@@ -1,0 +1,151 @@
+import { query } from '@anthropic-ai/claude-agent-sdk'
+import { existsSync } from 'node:fs'
+import { readFile } from 'node:fs/promises'
+import { getClaudeDir, resolveClaudePath } from '../utils/claudeDir'
+
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+function defaultManagerPrompt(claudeDir: string): string {
+  return `You are an assistant integrated into the Agent Manager UI. The user is managing their Claude Code agents, commands, skills, and plugins through a web interface.
+
+The current working directory is the user's Claude configuration folder: ${claudeDir}
+
+## File structure
+
+- **Agents**: Markdown files in \`${claudeDir}/agents/\` with YAML frontmatter (name, description, model, color, memory)
+- **Commands**: Markdown files in \`${claudeDir}/commands/\` (can be in subdirectories) with YAML frontmatter (name, description, argument-hint, allowed-tools)
+- **Skills**: Each skill is a directory in \`${claudeDir}/skills/<name>/SKILL.md\` with YAML frontmatter (name, description, context, agent)
+- **Settings**: \`${claudeDir}/settings.json\` — global Claude Code settings
+
+## Capabilities
+
+You can create, read, update, and delete any of these files. You can also:
+- **Bulk operations**: Rename, update, or delete multiple agents/commands/skills at once. When doing bulk ops, list what you'll change and ask for confirmation before executing.
+- **Audit**: Review all agents/commands/skills and report on quality, missing fields, inconsistencies.
+- **Generate**: Create new agents/commands/skills from a plain-English description. Ask clarifying questions first.
+- **Refactor**: Reorganize commands into directories, split large agents into agent+skills, consolidate duplicates.
+
+## Rules
+
+- Always confirm what you did after making changes.
+- For destructive operations (delete, overwrite), list exactly what will be affected and ask for confirmation.
+- When creating agents, use the YAML frontmatter format with --- delimiters.
+- Keep the user informed of progress during multi-step operations.
+- If the user describes what they need in plain English, translate that into the right agent/command/skill configuration.`
+}
+
+export default defineEventHandler(async (event) => {
+  const body = await readBody<{ messages: ChatMessage[]; sessionId?: string; agentSlug?: string; projectDir?: string }>(event)
+
+  if (!body.messages?.length) {
+    throw createError({ statusCode: 400, message: 'messages is required' })
+  }
+
+  const lastUserMessage = body.messages.filter(m => m.role === 'user').pop()
+  if (!lastUserMessage) {
+    throw createError({ statusCode: 400, message: 'No user message found' })
+  }
+
+  const claudeDir = getClaudeDir()
+
+  // Build system prompt depending on whether an agent is active
+  let systemAppend: string
+
+  if (body.agentSlug) {
+    const agentPath = resolveClaudePath('agents', `${body.agentSlug}.md`)
+    if (existsSync(agentPath)) {
+      const { parseFrontmatter } = await import('../utils/frontmatter')
+      const raw = await readFile(agentPath, 'utf-8')
+      const { frontmatter, body: agentBody } = parseFrontmatter<{ name?: string }>(raw)
+      const agentName = frontmatter.name || body.agentSlug
+      systemAppend = `You are "${agentName}", a specialized agent. Follow these instructions precisely:\n\n${agentBody}\n\nThe current working directory is: ${claudeDir}`
+    } else {
+      systemAppend = defaultManagerPrompt(claudeDir)
+    }
+  } else {
+    systemAppend = defaultManagerPrompt(claudeDir)
+  }
+
+  // Set up SSE headers
+  setResponseHeaders(event, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+  })
+
+  const sendEvent = (type: string, data: unknown) => {
+    event.node.res.write(`data: ${JSON.stringify({ type, ...data as object })}\n\n`)
+  }
+
+  try {
+    let sessionId = body.sessionId || null
+    let resultText = ''
+
+    for await (const message of query({
+      prompt: lastUserMessage.content,
+      options: {
+        cwd: body.projectDir && existsSync(body.projectDir) ? body.projectDir : claudeDir,
+        allowedTools: ['Read', 'Write', 'Edit', 'Glob', 'Grep'],
+        permissionMode: 'bypassPermissions',
+        allowDangerouslySkipPermissions: true,
+        maxTurns: 10,
+        includePartialMessages: true,
+        systemPrompt: {
+          type: 'preset',
+          preset: 'claude_code',
+          append: systemAppend,
+        },
+        ...(sessionId ? { resume: sessionId } : {}),
+      },
+    })) {
+      // Capture session ID for resumption
+      if (message.type === 'system' && message.subtype === 'init') {
+        sessionId = message.session_id
+        sendEvent('session', { sessionId })
+      }
+
+      // Stream incremental text and thinking deltas
+      if (message.type === 'stream_event' && message.event) {
+        const evt = message.event as {
+          type: string
+          content_block?: { type: string }
+          delta?: { type: string; text?: string; thinking?: string }
+        }
+        if (evt.type === 'content_block_start' && evt.content_block?.type === 'thinking') {
+          sendEvent('thinking_start', {})
+        }
+        if (evt.type === 'content_block_delta') {
+          if (evt.delta?.type === 'text_delta' && evt.delta.text) {
+            sendEvent('text_delta', { text: evt.delta.text })
+          } else if (evt.delta?.type === 'thinking_delta' && evt.delta.thinking) {
+            sendEvent('thinking_delta', { text: evt.delta.thinking })
+          }
+        }
+      }
+
+      // Tool progress — surface what Claude is doing
+      if (message.type === 'tool_progress') {
+        sendEvent('tool_progress', {
+          toolName: message.tool_name,
+          elapsed: message.elapsed_time_seconds,
+        })
+      }
+
+      // Final result
+      if ('result' in message) {
+        resultText = message.result
+        sendEvent('result', { text: resultText, stopReason: message.stop_reason })
+      }
+    }
+
+    sendEvent('done', { sessionId })
+  } catch (err: unknown) {
+    const errorMessage = err instanceof Error ? err.message : 'Unknown error'
+    sendEvent('error', { message: errorMessage })
+  }
+
+  event.node.res.end()
+})
