@@ -46,15 +46,19 @@ onUnmounted(() => {
   <div ref="dropdownRef" class="relative inline-block w-full">
     <button
       type="button"
-      class="flex items-center gap-2 w-full px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all text-left"
-      style="background: var(--surface-raised); color: var(--text-secondary); border: 1px solid var(--border-subtle);"
+      class="field-input flex items-center gap-2 text-left"
       @click="isOpen = !isOpen"
     >
-      <UIcon v-if="icon" :name="icon" class="size-3 text-meta" />
-      <span class="flex-1 truncate">{{ selectedOption?.label || placeholder || 'Select...' }}</span>
+      <UIcon v-if="icon" :name="icon" class="size-3.5 text-meta" />
+      <span 
+        class="flex-1 truncate"
+        :style="!selectedOption ? 'color: var(--text-disabled); font-family: var(--font-sans);' : ''"
+      >
+        {{ selectedOption?.label || placeholder || 'Select...' }}
+      </span>
       <UIcon
         :name="isOpen ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'"
-        class="size-3 text-meta"
+        class="size-3.5 text-meta"
       />
     </button>
 
