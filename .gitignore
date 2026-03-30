@@ -5,7 +5,7 @@
 .nitro
 .cache
 dist
-reference-claudecodeui-logic
+
 # Node dependencies
 node_modules
 
