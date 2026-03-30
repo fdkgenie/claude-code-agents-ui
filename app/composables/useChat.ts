@@ -115,6 +115,15 @@ export function useChat() {
             } else if (data.type === 'tool_progress') {
               usedTools.value = true
               activity.value = { type: 'tool', name: data.toolName, elapsed: data.elapsed }
+            } else if (data.type === 'tool_call') {
+              usedTools.value = true
+              const current = messages.value.find(m => m.id === assistantMsg.id)
+              const toolCalls = [...(current?.toolCalls || []), { id: data.id, toolName: data.toolName, input: data.input }]
+              updateMessage(assistantMsg.id, { toolCalls })
+            } else if (data.type === 'tool_result') {
+              const current = messages.value.find(m => m.id === assistantMsg.id)
+              const toolResults = [...(current?.toolResults || []), { id: data.id, toolName: data.toolName, result: data.result, isError: data.isError }]
+              updateMessage(assistantMsg.id, { toolResults })
             } else if (data.type === 'result') {
               updateMessage(assistantMsg.id, { content: data.text })
             } else if (data.type === 'error') {

@@ -445,6 +445,7 @@ function badgeFor(to: string) {
     </div>
     <GlobalSearch />
     <ChatPanel v-model:open="chatOpen" />
+    <FileEditorSidebar />
   </UApp>
 </template>
 

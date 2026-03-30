@@ -128,16 +128,39 @@ export default defineEventHandler(async (event) => {
 
       // Tool progress — surface what Claude is doing
       if (message.type === 'tool_progress') {
+        const m = message as any
         sendEvent('tool_progress', {
-          toolName: message.tool_name,
-          elapsed: message.elapsed_time_seconds,
+          toolName: m.tool_name,
+          elapsed: m.elapsed_time_seconds,
+        })
+      }
+
+      // Tool call
+      if (message.type === 'tool_call') {
+        const m = message as any
+        sendEvent('tool_call', {
+          id: m.id,
+          toolName: m.tool_name,
+          input: m.tool_input,
+        })
+      }
+
+      // Tool result
+      if (message.type === 'tool_result') {
+        const m = message as any
+        sendEvent('tool_result', {
+          id: m.tool_use_id,
+          toolName: m.tool_name,
+          result: m.content,
+          isError: m.is_error,
         })
       }
 
       // Final result
       if ('result' in message) {
-        resultText = message.result
-        sendEvent('result', { text: resultText, stopReason: message.stop_reason })
+        const m = message as any
+        resultText = m.result
+        sendEvent('result', { text: resultText, stopReason: m.stop_reason })
       }
     }
 

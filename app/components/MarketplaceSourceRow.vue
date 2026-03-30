@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { MarketplaceSource } from '~/types'
 
-defineProps<{
+const props = defineProps<{
   source: MarketplaceSource
 }>()
 
@@ -41,8 +41,7 @@ function cancelRemove() {
 
 <template>
   <div
-    class="flex items-center justify-between py-2 px-3 rounded-lg group/row"
-    style="background: var(--input-bg);"
+    class="flex items-center justify-between py-2.5 px-3 rounded-lg group/row hover-row"
   >
     <div class="flex items-center gap-3 flex-1 min-w-0">
       <UIcon name="i-lucide-store" class="size-3.5 shrink-0 text-meta" />

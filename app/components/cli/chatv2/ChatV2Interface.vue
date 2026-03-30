@@ -420,16 +420,13 @@ async function handleSessionDeleted(payload: { projectName: string; sessionId: s
   }
 }
 
+const { openFile } = useFileEditor()
+
 // Handle file open (from tool use clicks)
 function handleOpenFile(filePath: string) {
   console.log('[ChatV2] Open file:', filePath)
-  // TODO: Could open in VS Code or another editor
-  // For now, we can use the window.open with vscode:// protocol
-  // or emit an event for parent handling
   if (filePath) {
-    // Try to open in VS Code using the vscode:// protocol
-    const vscodeUrl = `vscode://file${filePath}`
-    window.open(vscodeUrl, '_blank')
+    openFile(filePath)
   }
 }
 </script>

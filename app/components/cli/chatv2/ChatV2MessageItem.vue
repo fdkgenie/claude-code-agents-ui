@@ -374,7 +374,7 @@ function getTodoStatusBadge(status: string): { bg: string; color: string; label:
       </div>
     </template>
 
-    <!-- Tool Use - Read/Write/Glob show filename only -->
+    <!-- Tool Use - Read/Write show filename only, Glob shows pattern (non-clickable) -->
     <template v-else-if="message.kind === 'tool_use' && ['Read', 'Write', 'Glob'].includes(message.toolName || '')">
       <div class="flex items-start gap-2">
         <!-- Left border indicator -->
@@ -387,8 +387,8 @@ function getTodoStatusBadge(status: string): { bg: string; color: string; label:
           <div class="text-[12px] flex items-center gap-2">
             <span style="color: var(--text-secondary);">{{ message.toolName }}</span>
 
-            <!-- Clickable filename -->
-            <template v-if="displayFileName">
+            <!-- Clickable filename for Read/Write -->
+            <template v-if="message.toolName !== 'Glob' && displayFileName">
               <span style="color: var(--text-tertiary);">/</span>
               <span
                 class="font-medium cursor-pointer hover:underline truncate"
@@ -397,6 +397,14 @@ function getTodoStatusBadge(status: string): { bg: string; color: string; label:
                 :title="toolFileName"
               >
                 {{ displayFileName }}
+              </span>
+            </template>
+
+            <!-- Non-clickable pattern for Glob -->
+            <template v-else-if="message.toolName === 'Glob' && toolFileName">
+              <span style="color: var(--text-tertiary);">:</span>
+              <span class="font-mono text-[11px] text-meta truncate" :title="toolFileName">
+                {{ toolFileName }}
               </span>
             </template>
 
@@ -422,13 +430,16 @@ function getTodoStatusBadge(status: string): { bg: string; color: string; label:
         />
 
         <div class="flex-1 min-w-0">
-          <!-- Tool header -->
-          <button
+          <!-- Tool header (clickable only if not Edit/Write or if Error) -->
+          <component
+            :is="(['Edit', 'Write', 'ApplyPatch'].includes(message.toolName || '') && !message.isError) ? 'div' : 'button'"
             class="inline-flex items-center gap-1.5 text-[12px] font-medium w-full text-left"
+            :class="{ 'cursor-default': (['Edit', 'Write', 'ApplyPatch'].includes(message.toolName || '') && !message.isError) }"
             style="color: var(--text-secondary);"
-            @click="showToolDetails = !showToolDetails"
+            @click="(['Edit', 'Write', 'ApplyPatch'].includes(message.toolName || '') && !message.isError) ? null : showToolDetails = !showToolDetails"
           >
             <UIcon
+              v-if="!(['Edit', 'Write', 'ApplyPatch'].includes(message.toolName || '') && !message.isError)"
               :name="showToolDetails ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
               class="size-3"
             />
@@ -454,10 +465,20 @@ function getTodoStatusBadge(status: string): { bg: string; color: string; label:
             >
               Error
             </span>
-          </button>
+          </component>
 
-          <!-- Expanded details -->
-          <div v-if="showToolDetails" class="mt-2 space-y-2 max-w-full overflow-hidden">
+          <!-- Diff viewer for Edit/Write tools -->
+          <div v-if="['Edit', 'Write', 'ApplyPatch'].includes(message.toolName || '') && !message.isError && toolFileName" class="mt-1">
+            <ToolDiffViewer
+              :file-path="toolFileName"
+              :old-content="message.toolInput?.old_string"
+              :new-content="message.toolInput?.new_string"
+              @file-click="handleFileClick"
+            />
+          </div>
+
+          <!-- Expanded details (only for non-Edit/Write or errors) -->
+          <div v-if="showToolDetails && !(['Edit', 'Write', 'ApplyPatch'].includes(message.toolName || '') && !message.isError)" class="mt-2 space-y-2 max-w-full overflow-hidden">
             <!-- Input -->
             <div v-if="message.toolInput">
               <div class="text-[10px] font-medium mb-1" style="color: var(--text-tertiary);">Input</div>

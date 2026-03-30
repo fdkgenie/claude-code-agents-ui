@@ -63,11 +63,23 @@ defineProps<{
         >{{ message.thinking }}</div>
       </details>
 
-      <!-- Tool activity indicator -->
+      <!-- Tool activity indicator (streaming) -->
       <StreamIndicator
         v-if="isStreaming && !message.content && activity?.type === 'tool'"
         :status-text="statusText"
       />
+
+      <!-- Tool results (after completion or during multi-step) -->
+      <div v-if="message.toolCalls?.length" class="space-y-1">
+        <div v-for="call in message.toolCalls" :key="call.id">
+          <ToolRenderer 
+            :tool-name="call.toolName" 
+            :tool-input="call.input"
+            :tool-result="message.toolResults?.find(r => r.id === call.id)?.result"
+            :is-error="message.toolResults?.find(r => r.id === call.id)?.isError"
+          />
+        </div>
+      </div>
 
       <!-- Initial streaming state (no tool, no thinking yet) -->
       <StreamIndicator

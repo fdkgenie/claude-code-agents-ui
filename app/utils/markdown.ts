@@ -1,5 +1,4 @@
 import { marked } from 'marked'
-import { codeToHtml } from 'shiki'
 import { protectMathBlocks, restoreMathBlocks } from './messageFormatting'
 
 // ── Shiki syntax highlighting ──────────────────────────────────────────────
@@ -13,6 +12,7 @@ const SUPPORTED_LANGS = new Set([
   'bash', 'sh', 'zsh', 'shell', 'fish',
   'sql', 'graphql', 'markdown', 'md',
   'vue', 'svelte', 'astro',
+  'diff',
   'dockerfile', 'docker',
   'php', 'perl', 'scala', 'haskell', 'elixir', 'erlang',
   'lua', 'dart', 'r', 'matlab', 'tex', 'latex',
@@ -24,7 +24,7 @@ const highlightedCache = new Map<string, string>()
  * Highlight a code block using Shiki.
  * Falls back to plain <code> on failure / unsupported language.
  */
-async function highlightCode(code: string, lang: string): Promise<string> {
+export async function highlightCode(code: string, lang: string): Promise<string> {
   const language = (lang || 'text').toLowerCase()
   const cacheKey = `${language}:${code}`
   if (highlightedCache.has(cacheKey)) {
@@ -33,8 +33,16 @@ async function highlightCode(code: string, lang: string): Promise<string> {
 
   const resolvedLang = SUPPORTED_LANGS.has(language) ? language : 'text'
 
+  if (import.meta.server) {
+    const escaped = code.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    return `<div class="shiki-wrapper" data-lang="${lang || ''}"><pre><code>${escaped}</code></pre></div>`
+  }
+
   try {
-    const html = await codeToHtml(code, {
+    const { codeToHtml: c2h } = await import('shiki').catch(() => ({ codeToHtml: null }))
+    if (!c2h) throw new Error('Shiki not loaded')
+    
+    const html = await c2h(code, {
       lang: resolvedLang,
       theme: 'tokyo-night',
     })

@@ -229,6 +229,8 @@ export interface ChatMessage {
   content: string
   thinking?: string
   timestamp: number
+  toolCalls?: Array<{ id: string; toolName: string; input: any }>
+  toolResults?: Array<{ id: string; toolName: string; result: any; isError?: boolean }>
 }
 
 export type StreamActivity =
