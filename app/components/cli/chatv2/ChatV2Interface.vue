@@ -598,7 +598,10 @@ function handleOpenFile(filePath: string) {
     <!-- Right Panel - Chat Interface -->
     <div class="flex-1 flex flex-col min-h-0 min-w-0">
       <!-- Header - Fixed height for consistent alignment -->
-      <div class="shrink-0 flex items-center justify-between px-3 md:px-4 h-14 border-b" style="border-color: var(--border-subtle);">
+      <div
+        class="shrink-0 flex items-center justify-between px-3 md:px-4 h-14 border-b relative z-20"
+        style="border-color: var(--border-subtle); background: var(--surface-base);"
+      >
         <div class="flex items-center gap-2 min-w-0 flex-1">
           <!-- History Mode - Session Info -->
           <template v-if="viewMode === 'history'">
