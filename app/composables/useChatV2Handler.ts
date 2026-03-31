@@ -12,6 +12,7 @@ import type {
 import { useStreamingBuffer } from './useStreamingBuffer'
 import { usePermissions } from './usePermissions'
 import { useSessionStore } from './useSessionStore'
+import { useContextMonitor } from './useContextMonitor'
 
 export function useChatV2Handler() {
   const ws = ref<WebSocket | null>(null)
@@ -24,6 +25,10 @@ export function useChatV2Handler() {
 
   // Integrate permissions
   const permissions = usePermissions()
+
+  // Integrate context monitor
+  const contextMonitor = useContextMonitor()
+  contextMonitor.startMonitoring()
 
   // Session store for message persistence
   const sessionStore = useSessionStore()
@@ -252,6 +257,18 @@ export function useChatV2Handler() {
           // Update status
           sessionStore.setStatus(completeSessionId, 'idle')
           sessionStore.appendRealtime(completeSessionId, message)
+
+          // Update context monitor if usage info is available
+          if (message.metadata?.modelUsage) {
+            contextMonitor.handleWebSocketEvent({
+              type: 'token_update',
+              tokens: {
+                input: message.metadata.modelUsage.input_tokens || 0,
+                output: message.metadata.modelUsage.output_tokens || 0,
+                cached: message.metadata.modelUsage.cache_read_input_tokens || 0,
+              }
+            } as any)
+          }
         }
         break
 
@@ -454,6 +471,9 @@ export function useChatV2Handler() {
     // Permissions
     permissions,
     hasPendingPermissions: permissions.hasPending,
+
+    // Context Monitoring
+    contextMonitor,
 
     // Actions
     connect,
