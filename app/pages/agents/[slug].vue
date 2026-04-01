@@ -3,15 +3,16 @@ import type { AgentFrontmatter, AgentSkill } from '~/types'
 
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 const slug = route.params.slug as string
 
 const { fetchOne, remove } = useAgents()
 const { clearChat: clearStudioChat, toolCalls, isStreaming: studioStreaming } = useStudioChat()
 
-const frontmatter = ref<AgentFrontmatter>({ name: '', description: '' })
+const frontmatter = ref<AgentFrontmatter>({ name: '', description: '', tools: [] })
 const body = ref('')
 const savedBody = ref('')
-const savedFrontmatter = ref<AgentFrontmatter>({ name: '', description: '' })
+const savedFrontmatter = ref<AgentFrontmatter>({ name: '', description: '', tools: [] })
 const loading = ref(true)
 const saving = ref(false)
 const lastModified = ref<number | null>(null)
@@ -30,8 +31,16 @@ async function loadAgent() {
   try {
     const agent = await fetchOne(slug) as unknown as Record<string, unknown>
     const fm = agent.frontmatter as AgentFrontmatter
-    frontmatter.value = { ...fm }
-    savedFrontmatter.value = { ...fm }
+    
+    // Ensure memory and tools are initialized
+    const normalizedFm = { 
+      memory: 'none',
+      tools: [],
+      ...fm 
+    } as AgentFrontmatter
+    
+    frontmatter.value = { ...normalizedFm }
+    savedFrontmatter.value = { ...normalizedFm }
     body.value = agent.body as string
     savedBody.value = agent.body as string
     lastModified.value = (agent.lastModified as number) || null
@@ -75,11 +84,21 @@ async function save() {
     savedBody.value = body.value
     lastModified.value = result.lastModified || null
 
+    toast.add({
+      title: 'Agent saved successfully',
+      color: 'success'
+    })
+
     if (result.slug !== slug) {
       router.push(`/agents/${result.slug}`)
     }
-  } catch (e: unknown) {
+  } catch (e: any) {
     console.error('Failed to save:', e)
+    toast.add({
+      title: 'Failed to save agent',
+      description: e.data?.message || e.message,
+      color: 'error'
+    })
   } finally {
     saving.value = false
   }

@@ -161,75 +161,80 @@ interface DetectedSkill {
   hasSupporting: boolean
 }
 
+interface DetectedAgent {
+  slug: string
+  name: string
+  description: string
+  filePath: string
+}
+
 export async function detectSkills(
   owner: string,
   repo: string,
   branch: string,
   targetPath: string | null,
-): Promise<{ skills: DetectedSkill[]; detectionMethod: 'frontmatter' | 'skills-index' }> {
-  const tree = await fetchRepoTree(owner, repo, branch)
+  tree: GithubTreeEntry[]
+): Promise<{ skills: DetectedSkill[]; totalCount: number; detectionMethod: 'frontmatter' | 'skills-index' }> {
+  let skills: DetectedSkill[] = []
+  let totalCount = 0
+  let detectionMethod: 'frontmatter' | 'skills-index' = 'frontmatter'
 
-  // 1. Check for skills-index.json at repo root
+  // 1. Check for skills-index.json at repo root for skills
   const indexEntry = tree.find(e => e.path === 'skills-index.json')
   if (indexEntry) {
     const content = await fetchFileContent(owner, repo, branch, 'skills-index.json')
-    const index = JSON.parse(content) as SkillsIndex
-    let skills = index.skills.map(s => ({
-      slug: s.slug,
-      name: s.name || s.slug,
-      description: typeof s.description === 'string' ? s.description.replace(/^>\s*/, '') : '',
-      category: s.category || null,
-      tags: Array.isArray(s.tags) ? s.tags : (typeof s.tags === 'string' ? [s.tags] : []),
-      filePath: s.files?.[0] || s.path,
-      hasSupporting: (s.files?.length || 0) > 1,
-    }))
+    try {
+      const index = JSON.parse(content) as SkillsIndex
+      skills = index.skills.map(s => ({
+        slug: s.slug,
+        name: s.name || s.slug,
+        description: typeof s.description === 'string' ? s.description.replace(/^>\s*/, '') : '',
+        category: s.category || null,
+        tags: Array.isArray(s.tags) ? s.tags : (typeof s.tags === 'string' ? [s.tags] : []),
+        filePath: s.files?.[0] || s.path,
+        hasSupporting: (s.files?.length || 0) > 1,
+      }))
 
-    // Filter to target path if specified
-    if (targetPath) {
-      skills = skills.filter(s => s.filePath.startsWith(targetPath))
+      // Filter to target path if specified
+      if (targetPath) {
+        skills = skills.filter(s => s.filePath.startsWith(targetPath))
+      }
+      detectionMethod = 'skills-index'
+      return { skills, totalCount: skills.length, detectionMethod }
+    } catch {
+      // Fallback to frontmatter if index is invalid
     }
-
-    return { skills, detectionMethod: 'skills-index' }
   }
 
-  // 2. Fallback: scan for .md files with valid frontmatter
+  // 2. Scan for SKILL.md files
   const prefix = targetPath ? targetPath + '/' : ''
-  const mdFiles = tree.filter(e =>
+  const skillFiles = tree.filter(e =>
     e.type === 'blob'
-    && e.path.endsWith('.md')
+    && e.path.toLowerCase().endsWith('skill.md')
     && (prefix ? e.path.startsWith(prefix) : true)
-    && !SKIP_FILENAMES.has(e.path.split('/').pop()!)
   )
 
-  const skills: DetectedSkill[] = []
-  const filesToScan = mdFiles.slice(0, 50)
+  totalCount = skillFiles.length
 
-  for (const file of filesToScan) {
+  // Only scan first 50 to avoid rate limits
+  for (const file of skillFiles.slice(0, 50)) {
     try {
       const content = await fetchFileContent(owner, repo, branch, file.path)
-      const { frontmatter } = parseFrontmatter<SkillFrontmatter>(content)
+      const { frontmatter } = parseFrontmatter<any>(content)
 
       if (frontmatter.name && frontmatter.description) {
         const parts = file.path.split('/')
-        const fileName = parts.pop()!
-        const parentDir = parts.pop()
-        let slug = (fileName.toLowerCase() === 'skill.md' && parentDir)
-          ? parentDir
-          : fileName.replace(/\.md$/, '')
+        const parentDir = parts.at(-2)
+        const slug = parentDir || frontmatter.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
 
-        if ((slug.toLowerCase() === 'skill' || !slug) && frontmatter.name) {
-          slug = frontmatter.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
-        }
-
-        const dir = parts.concat(parentDir ? [parentDir] : []).join('/')
+        const dir = parts.slice(0, -1).join('/')
         const hasSupporting = tree.some(e =>
           e.type === 'blob'
           && e.path.startsWith(dir + '/')
           && e.path !== file.path
         )
 
-        const pathParts = file.path.split('/')
-        const category = pathParts.length > 2 ? pathParts[pathParts.length - 3] || null : null
+        const category = parts.length > 2 ? parts[parts.length - 3] || null : null
 
         skills.push({
           slug,
@@ -241,22 +246,83 @@ export async function detectSkills(
           hasSupporting,
         })
       }
-    } catch {
-      // Skip files that can't be fetched/parsed
+    } catch (e: any) {
+      if (e.statusCode === 429) throw e // Propagate rate limit
     }
   }
 
-  return { skills, detectionMethod: 'frontmatter' }
+  return { skills, totalCount, detectionMethod: 'frontmatter' }
+}
+
+export async function detectAgents(
+  owner: string,
+  repo: string,
+  branch: string,
+  targetPath: string | null,
+  tree: GithubTreeEntry[]
+): Promise<{ agents: DetectedAgent[]; totalCount: number }> {
+  const agents: DetectedAgent[] = []
+  const prefix = targetPath ? targetPath + '/' : ''
+  
+  // Scan for .md files (excluding SKILL.md and common docs)
+  const mdFiles = tree.filter(e =>
+    e.type === 'blob'
+    && e.path.endsWith('.md')
+    && !e.path.toLowerCase().endsWith('skill.md')
+    && (prefix ? e.path.startsWith(prefix) : true)
+    && !SKIP_FILENAMES.has(e.path.split('/').pop()!)
+  )
+
+  // Every markdown file that is not a SKILL.md or README is a potential agent
+  const totalCount = mdFiles.length
+
+  // Prioritize agents/ folder
+  const prioritized = mdFiles.sort((a, b) => {
+    const aIsAgent = a.path.includes('agents/') || a.path.toLowerCase().includes('agent')
+    const bIsAgent = b.path.includes('agents/') || b.path.toLowerCase().includes('agent')
+    if (aIsAgent && !bIsAgent) return -1
+    if (!aIsAgent && bIsAgent) return 1
+    return 0
+  })
+
+  // Only scan first 50 to avoid rate limits
+  for (const file of prioritized.slice(0, 50)) {
+    try {
+      const content = await fetchFileContent(owner, repo, branch, file.path)
+      const { frontmatter } = parseFrontmatter<any>(content)
+
+      if (frontmatter.name && frontmatter.description) {
+        const parts = file.path.split('/')
+        const fileName = parts.pop()!
+        let slug = fileName.replace(/\.md$/, '')
+        
+        if (slug.toLowerCase() === 'agent' && parts.length > 0) {
+          slug = parts[parts.length - 1]!
+        }
+
+        agents.push({
+          slug,
+          name: frontmatter.name,
+          description: frontmatter.description,
+          filePath: file.path,
+        })
+      }
+    } catch (e: any) {
+      if (e.statusCode === 429) throw e // Propagate rate limit
+    }
+  }
+
+  return { agents, totalCount }
 }
 
 // ── Registry helpers ──────────────────────────────────
 
-export function getImportsPath(): string {
-  return resolveClaudePath('github', 'imports.json')
+export function getRegistryPath(type: 'skills' | 'agents'): string {
+  return resolveClaudePath('github', `${type}-imports.json`)
 }
 
-export async function readImportsRegistry(): Promise<GithubImportsRegistry> {
-  const path = getImportsPath()
+export async function readImportsRegistry(type: 'skills' | 'agents'): Promise<GithubImportsRegistry> {
+  const path = getRegistryPath(type)
   if (!existsSync(path)) return { imports: [] }
   try {
     const raw = await readFile(path, 'utf-8')
@@ -266,8 +332,8 @@ export async function readImportsRegistry(): Promise<GithubImportsRegistry> {
   }
 }
 
-export async function writeImportsRegistry(registry: GithubImportsRegistry): Promise<void> {
-  const path = getImportsPath()
+export async function writeImportsRegistry(type: 'skills' | 'agents', registry: GithubImportsRegistry): Promise<void> {
+  const path = getRegistryPath(type)
   const dir = dirname(path)
   if (!existsSync(dir)) {
     await mkdir(dir, { recursive: true })

@@ -33,7 +33,7 @@ async function findSkillPath(slug: string): Promise<string | null> {
   const githubDir = resolveClaudePath('github')
   if (existsSync(githubDir)) {
     const { readImportsRegistry } = await import('../../utils/github')
-    const registry = await readImportsRegistry()
+    const registry = await readImportsRegistry('skills')
 
     for (const entry of registry.imports) {
       if (!existsSync(entry.localPath)) continue

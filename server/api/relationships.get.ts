@@ -121,12 +121,12 @@ async function loadMcpServers(workingDir?: string) {
 }
 
 async function loadGithubSkillSlugs(): Promise<string[]> {
-  const path = resolveClaudePath('github', 'imports.json')
+  const path = resolveClaudePath('github', 'skills-imports.json')
   if (!existsSync(path)) return []
   try {
     const raw = await readFile(path, 'utf-8')
-    const registry = JSON.parse(raw) as { imports: { selectedSkills: string[] }[] }
-    return registry.imports.flatMap(i => i.selectedSkills)
+    const registry = JSON.parse(raw) as { imports: { selectedItems: string[] }[] }
+    return registry.imports.flatMap(i => i.selectedItems || [])
   } catch {
     return []
   }

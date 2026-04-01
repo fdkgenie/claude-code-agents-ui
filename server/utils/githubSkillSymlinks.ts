@@ -106,6 +106,59 @@ export async function resolveGithubImportSkillDirs(entry: GithubImport): Promise
   return out
 }
 
+/** Map agent slug -> absolute file path that should become ~/.claude/agents/<slug>.md. */
+export async function resolveGithubImportAgentFiles(entry: GithubImport): Promise<Map<string, string>> {
+  const out = new Map<string, string>()
+
+  const scanRoot = entry.targetPath
+    ? join(entry.localPath, entry.targetPath)
+    : entry.localPath
+
+  if (!existsSync(scanRoot) || !existsSync(entry.localPath)) return out
+
+  const SKIP_FILENAMES = new Set<string>([
+    'README.md', 'readme.md',
+    'CHANGELOG.md', 'changelog.md',
+    'CONTRIBUTING.md', 'contributing.md',
+    'LICENSE.md', 'license.md',
+    'CODE_OF_CONDUCT.md',
+  ])
+  const skipLower = new Set([...SKIP_FILENAMES].map(s => s.toLowerCase()))
+
+  const walk = async (dir: string) => {
+    const items = await readdir(dir, { withFileTypes: true })
+    for (const item of items) {
+      if (item.name.startsWith('.')) continue
+      const fullPath = join(dir, item.name)
+      if (item.isDirectory()) {
+        await walk(fullPath)
+        continue
+      }
+      if (!item.isFile()) continue
+      if (!item.name.toLowerCase().endsWith('.md')) continue
+      if (skipLower.has(item.name.toLowerCase())) continue
+
+      const raw = await readFile(fullPath, 'utf-8')
+      const { frontmatter } = parseFrontmatter<any>(raw)
+      
+      // Detect Agent
+      if (frontmatter.name && frontmatter.description && (fullPath.includes('agents/') || frontmatter.model || frontmatter.skills)) {
+        const parts = fullPath.split('/')
+        const fileName = parts.pop()!
+        let slug = fileName.replace(/\.md$/, '')
+        if (slug.toLowerCase() === 'agent' && parts.length > 0) {
+          slug = parts[parts.length - 1]
+        }
+        if (!slug) continue
+        if (!out.has(slug)) out.set(slug, fullPath)
+      }
+    }
+  }
+
+  await walk(scanRoot)
+  return out
+}
+
 export type GithubSymlinkSyncResult = {
   linked: string[]
   removed: string[]
@@ -114,14 +167,13 @@ export type GithubSymlinkSyncResult = {
 }
 
 /**
- * Create ~/.claude/skills/<slug> -> clone skill dirs for selected slugs.
- * Remove symlinks that pointed into this import's clone when deselected.
- * Does not delete real directories (only symbolic links we own by path).
+ * Create ~/.claude/skills/<slug> or ~/.claude/agents/<slug>.md based on type.
  */
-export async function syncGithubImportSkillSymlinks(
+export async function syncGithubImportSymlinks(
   entry: GithubImport,
-  previousSlugs: string[],
-  selectedSlugs: string[],
+  previousItems: string[],
+  selectedItems: string[],
+  type: 'skills' | 'agents'
 ): Promise<GithubSymlinkSyncResult> {
   const result: GithubSymlinkSyncResult = {
     linked: [],
@@ -130,55 +182,86 @@ export async function syncGithubImportSkillSymlinks(
     missingInClone: [],
   }
 
-  const skillsRoot = resolveClaudePath('skills')
-  await mkdir(skillsRoot, { recursive: true })
+  const root = resolveClaudePath(type)
+  await mkdir(root, { recursive: true })
 
-  const slugToDir = await resolveGithubImportSkillDirs(entry)
   const cloneRoot = pathResolve(entry.localPath)
 
-  const previousSet = new Set(previousSlugs)
-  const selectedSet = new Set(selectedSlugs)
+  if (type === 'skills') {
+    const slugToDir = await resolveGithubImportSkillDirs(entry)
+    const previousSet = new Set(previousItems)
+    const selectedSet = new Set(selectedItems)
 
-  for (const slug of previousSet) {
-    if (selectedSet.has(slug)) continue
-    const linkPath = join(skillsRoot, slug)
-    if (!existsSync(linkPath)) continue
-    try {
-      const st = await lstat(linkPath)
-      if (!st.isSymbolicLink()) continue
-      const rawTarget = await readlink(linkPath)
-      const absTarget = pathResolve(dirname(linkPath), rawTarget)
-      if (!isUnderClaudePath(cloneRoot, absTarget)) continue
-      await unlink(linkPath)
-      result.removed.push(slug)
-    } catch {
-      // ignore per-slug failures
-    }
-  }
-
-  for (const slug of selectedSlugs) {
-    const skillDir = slugToDir.get(slug)
-    if (!skillDir || !existsSync(skillDir)) {
-      result.missingInClone.push(slug)
-      continue
-    }
-    const target = pathResolve(skillDir)
-    const linkPath = join(skillsRoot, slug)
-
-    try {
-      if (existsSync(linkPath)) {
+    for (const slug of previousSet) {
+      if (selectedSet.has(slug)) continue
+      const linkPath = join(root, slug)
+      if (!existsSync(linkPath)) continue
+      try {
         const st = await lstat(linkPath)
-        if (st.isSymbolicLink()) {
-          await unlink(linkPath)
-        } else {
-          result.skippedConflicts.push(slug)
-          continue
-        }
+        if (!st.isSymbolicLink()) continue
+        const rawTarget = await readlink(linkPath)
+        const absTarget = pathResolve(dirname(linkPath), rawTarget)
+        if (!isUnderClaudePath(cloneRoot, absTarget)) continue
+        await unlink(linkPath)
+        result.removed.push(slug)
+      } catch { }
+    }
+
+    for (const slug of selectedItems) {
+      const skillDir = slugToDir.get(slug)
+      if (!skillDir || !existsSync(skillDir)) {
+        result.missingInClone.push(slug)
+        continue
       }
-      await symlink(target, linkPath, 'dir')
-      result.linked.push(slug)
-    } catch {
-      result.skippedConflicts.push(slug)
+      const target = pathResolve(skillDir)
+      const linkPath = join(root, slug)
+      try {
+        if (existsSync(linkPath)) {
+          const st = await lstat(linkPath)
+          if (st.isSymbolicLink()) await unlink(linkPath)
+          else { result.skippedConflicts.push(slug); continue }
+        }
+        await symlink(target, linkPath, 'dir')
+        result.linked.push(slug)
+      } catch { result.skippedConflicts.push(slug) }
+    }
+  } else {
+    const slugToFile = await resolveGithubImportAgentFiles(entry)
+    const previousSet = new Set(previousItems)
+    const selectedSet = new Set(selectedItems)
+
+    for (const slug of previousSet) {
+      if (selectedSet.has(slug)) continue
+      const linkPath = join(root, `${slug}.md`)
+      if (!existsSync(linkPath)) continue
+      try {
+        const st = await lstat(linkPath)
+        if (!st.isSymbolicLink()) continue
+        const rawTarget = await readlink(linkPath)
+        const absTarget = pathResolve(dirname(linkPath), rawTarget)
+        if (!isUnderClaudePath(cloneRoot, absTarget)) continue
+        await unlink(linkPath)
+        result.removed.push(slug)
+      } catch { }
+    }
+
+    for (const slug of selectedItems) {
+      const file = slugToFile.get(slug)
+      if (!file || !existsSync(file)) {
+        result.missingInClone.push(slug)
+        continue
+      }
+      const target = pathResolve(file)
+      const linkPath = join(root, `${slug}.md`)
+      try {
+        if (existsSync(linkPath)) {
+          const st = await lstat(linkPath)
+          if (st.isSymbolicLink()) await unlink(linkPath)
+          else { result.skippedConflicts.push(slug); continue }
+        }
+        await symlink(target, linkPath, 'file')
+        result.linked.push(slug)
+      } catch { result.skippedConflicts.push(slug) }
     }
   }
 

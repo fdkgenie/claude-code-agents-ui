@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import type { AgentFrontmatter, AgentMemory, AgentSkill } from '~/types'
+import type { AgentFrontmatter, AgentMemory, AgentSkill, AgentTool } from '~/types'
 import { MODEL_META, MODEL_IDS } from '~/utils/models'
+import { getAgentColor, agentColorMap } from '~/utils/colors'
 
 const props = defineProps<{
   frontmatter: AgentFrontmatter
@@ -25,9 +26,19 @@ const modelOptions = MODEL_IDS.map(id => ({
 }))
 
 const memoryOptions: { label: string; value: AgentMemory; description: string }[] = [
-  { label: 'User', value: 'user', description: 'Shared across all projects' },
-  { label: 'Project', value: 'project', description: 'Specific to this repository' },
-  { label: 'None', value: 'none', description: 'No persistent memory' },
+  { label: 'User', value: 'user', description: 'Global memory at ~/.claude/agent-memory/' },
+  { label: 'Project', value: 'project', description: 'Project-specific persistent memory' },
+  { label: 'Local', value: 'local', description: 'Memory stored in current directory' },
+  { label: 'None', value: 'none', description: 'Do not persist learnings' },
+]
+
+const toolOptions: { label: string; value: AgentTool; icon: string; description: string }[] = [
+  { label: 'Read', value: 'Read', icon: 'i-lucide-book-open', description: 'Read file contents' },
+  { label: 'Grep', value: 'Grep', icon: 'i-lucide-search', description: 'Search inside files' },
+  { label: 'Glob', value: 'Glob', icon: 'i-lucide-files', description: 'Find files by pattern' },
+  { label: 'Bash', value: 'Bash', icon: 'i-lucide-terminal', description: 'Execute shell commands' },
+  { label: 'Write', value: 'Write', icon: 'i-lucide-pencil-line', description: 'Create or overwrite files' },
+  { label: 'Edit', value: 'Edit', icon: 'i-lucide-file-text', description: 'Edit specific lines in files' },
 ]
 
 function updateFrontmatter(key: keyof AgentFrontmatter, value: unknown) {
@@ -42,6 +53,17 @@ const preloadedSkillSlugs = computed({
   get: () => props.frontmatter.skills || [],
   set: (val) => updateFrontmatter('skills', val)
 })
+
+function toggleTool(tool: AgentTool) {
+  const tools = [...(props.frontmatter.tools || [])]
+  const idx = tools.indexOf(tool)
+  if (idx === -1) tools.push(tool)
+  else tools.splice(idx, 1)
+  updateFrontmatter('tools', tools)
+}
+
+const presetColors = Object.entries(agentColorMap)
+const currentColor = computed(() => getAgentColor(props.frontmatter.color))
 </script>
 
 <template>
@@ -108,9 +130,78 @@ const preloadedSkillSlugs = computed({
           </button>
         </div>
       </div>
-      <div class="space-y-1">
-        <label class="text-[11px] font-medium" style="color: var(--text-tertiary);">Color</label>
-        <input type="color" :value="frontmatter.color || '#e5a93e'" class="w-8 h-8 rounded-lg cursor-pointer border" style="border-color: var(--border-subtle);" @input="updateFrontmatter('color', ($event.target as HTMLInputElement).value)" />
+
+      <!-- Tools selection -->
+      <div class="space-y-2 pt-2">
+        <label class="text-[11px] font-medium uppercase tracking-wider opacity-50" style="color: var(--text-primary);">Allowed Tools</label>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            v-for="tool in toolOptions"
+            :key="tool.value"
+            class="flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all border text-left"
+            :style="{
+              background: frontmatter.tools?.includes(tool.value) ? 'var(--accent-muted)' : 'var(--surface-base)',
+              borderColor: frontmatter.tools?.includes(tool.value) ? 'rgba(229, 169, 62, 0.3)' : 'var(--border-subtle)',
+            }"
+            @click="toggleTool(tool.value)"
+          >
+            <div 
+              class="size-7 rounded-lg flex items-center justify-center shrink-0 transition-colors"
+              :style="{ 
+                background: frontmatter.tools?.includes(tool.value) ? 'rgba(229, 169, 62, 0.1)' : 'var(--surface-raised)',
+                color: frontmatter.tools?.includes(tool.value) ? 'var(--accent)' : 'var(--text-tertiary)'
+              }"
+            >
+              <UIcon :name="tool.icon" class="size-3.5" />
+            </div>
+            <div class="flex-1 min-w-0">
+              <div class="text-[11.5px] font-medium leading-none" :style="{ color: frontmatter.tools?.includes(tool.value) ? 'var(--text-primary)' : 'var(--text-secondary)' }">
+                {{ tool.label }}
+              </div>
+            </div>
+            <div v-if="frontmatter.tools?.includes(tool.value)" class="shrink-0">
+              <UIcon name="i-lucide-check" class="size-3" style="color: var(--accent);" />
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Color -->
+      <div class="space-y-2.5 pt-2">
+        <label class="text-[11px] font-medium uppercase tracking-wider opacity-50" style="color: var(--text-primary);">UI Theme Color</label>
+        <div class="flex flex-wrap gap-2">
+          <!-- Preset Swatches -->
+          <button
+            v-for="[name, value] in presetColors"
+            :key="name"
+            type="button"
+            class="size-6 rounded-full border-2 transition-all hover:scale-110 active:scale-95"
+            :style="{ 
+              background: value, 
+              borderColor: (frontmatter.color === name || frontmatter.color === value) ? 'white' : 'transparent',
+              boxShadow: (frontmatter.color === name || frontmatter.color === value) ? '0 0 0 1px ' + value : 'none'
+            }"
+            :title="name"
+            @click="updateFrontmatter('color', name)"
+          />
+          
+          <!-- Custom Color Picker -->
+          <div class="relative flex items-center gap-2 ml-1 pl-3 border-l" style="border-color: var(--border-subtle);">
+            <div 
+              class="size-6 rounded-full border relative overflow-hidden" 
+              :style="{ background: currentColor, borderColor: 'var(--border-subtle)' }"
+            >
+              <input 
+                type="color" 
+                :value="currentColor" 
+                class="absolute inset-0 opacity-0 cursor-pointer scale-150" 
+                @input="updateFrontmatter('color', ($event.target as HTMLInputElement).value)" 
+              />
+              <UIcon name="i-lucide-plus" class="absolute inset-0 m-auto size-3 pointer-events-none" style="color: white; mix-blend-mode: difference;" />
+            </div>
+            <span class="text-[10px] font-mono opacity-60 uppercase" style="color: var(--text-tertiary);">{{ frontmatter.color || 'Default' }}</span>
+          </div>
+        </div>
       </div>
     </div>
 

@@ -1,28 +1,50 @@
-import { syncGithubImportSkillSymlinks } from '../../utils/githubSkillSymlinks'
+import { resolveClaudePath } from '../../utils/claudeDir'
+import { 
+  readImportsRegistry, 
+  findImport, 
+  writeImportsRegistry 
+} from '../../utils/github'
+import { 
+  gitClone, 
+  gitGetHead, 
+  removeClone 
+} from '../../utils/gitOps'
+import { syncGithubImportSymlinks } from '../../utils/githubSkillSymlinks'
 
 export default defineEventHandler(async (event) => {
-  const { owner, repo, url, targetPath, selectedSkills } = await readBody<{
+  const { owner, repo, url, targetPath, selectedItems, totalItems, type } = await readBody<{
     owner: string
     repo: string
     url: string
     targetPath: string
-    selectedSkills: string[]
+    selectedItems: string[]
+    totalItems: number
+    type: 'skills' | 'agents'
   }>(event)
 
-  if (!owner || !repo || !url) {
-    throw createError({ statusCode: 400, message: 'owner, repo, and url are required' })
+  if (!owner || !repo || !url || !type) {
+    const missing = []
+    if (!owner) missing.push('owner')
+    if (!repo) missing.push('repo')
+    if (!url) missing.push('url')
+    if (!type) missing.push('type')
+    throw createError({ 
+      statusCode: 400, 
+      message: `Missing required fields: ${missing.join(', ')}` 
+    })
   }
 
-  const registry = await readImportsRegistry()
+  const registry = await readImportsRegistry(type)
 
   if (findImport(registry, owner, repo)) {
     throw createError({
       statusCode: 409,
-      data: { error: 'already_exists', message: 'This repository is already imported' },
+      data: { error: 'already_exists', message: `This repository is already imported as ${type}` },
     })
   }
 
-  const localPath = resolveClaudePath('github', owner, repo)
+  // Use type-specific local path to allow same repo to be imported for both types without conflict
+  const localPath = resolveClaudePath('github', type, owner, repo)
   const repoUrl = `https://github.com/${owner}/${repo}.git`
 
   await gitClone(repoUrl, localPath)
@@ -35,6 +57,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const now = new Date().toISOString()
+  
   const entry = {
     owner,
     repo,
@@ -45,20 +68,21 @@ export default defineEventHandler(async (event) => {
     lastChecked: now,
     currentSha: sha,
     remoteSha: sha,
-    selectedSkills: selectedSkills || [],
+    selectedItems: selectedItems || [],
+    totalItems: totalItems || 0,
   }
 
   registry.imports.push(entry)
 
   try {
-    await writeImportsRegistry(registry)
+    await writeImportsRegistry(type, registry)
   } catch {
     await removeClone(localPath)
     throw createError({ statusCode: 500, message: 'Failed to save import registry' })
   }
 
   try {
-    await syncGithubImportSkillSymlinks(entry, [], entry.selectedSkills || [])
+    await syncGithubImportSymlinks(entry, [], entry.selectedItems, type)
   } catch {
     // Registry import succeeded; symlinks are best-effort (permissions, layout).
   }

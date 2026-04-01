@@ -5,6 +5,7 @@ const route = useRoute()
 const router = useRouter()
 const { fetchServer, addServer, removeServer } = useMCP()
 const { clearChat: clearStudioChat, toolCalls, isStreaming: studioStreaming } = useStudioChat()
+const toast = useToast()
 
 const name = route.params.name as string
 const scope = route.query.scope as 'global' | 'project'
@@ -95,17 +96,24 @@ async function save() {
   try {
     await addServer(payload)
     initialForm.value = JSON.stringify(form.value)
+
     if (payload.name !== name) {
       router.push({ path: `/mcp/${encodeURIComponent(payload.name)}`, query: { scope: payload.scope } })
     }
+  } catch (e: any) {
+    // Error is already handled/toasted by useMCP
   } finally {
     saving.value = false
   }
 }
 
 async function handleDelete() {
-  await removeServer(name, scope)
-  router.push('/mcp')
+  try {
+    await removeServer(name, scope)
+    router.push('/mcp')
+  } catch (e: any) {
+    // Error is already handled/toasted by useMCP
+  }
 }
 
 function handleKeydown(e: KeyboardEvent) {

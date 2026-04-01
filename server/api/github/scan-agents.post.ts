@@ -1,4 +1,11 @@
 import { existsSync } from 'node:fs'
+import { resolveClaudePath } from '../../utils/claudeDir'
+import { 
+  parseGithubUrl, 
+  getDefaultBranch, 
+  fetchRepoTree, 
+  detectAgents 
+} from '../../utils/github'
 
 export default defineEventHandler(async (event) => {
   const { url } = await readBody<{ url: string }>(event)
@@ -19,19 +26,23 @@ export default defineEventHandler(async (event) => {
   }
 
   const branch = parsed.branch || await getDefaultBranch(parsed.owner, parsed.repo)
-  const { skills, detectionMethod } = await detectSkills(parsed.owner, parsed.repo, branch, parsed.path)
+  
+  // Fetch tree once
+  const tree = await fetchRepoTree(parsed.owner, parsed.repo, branch)
+  
+  const { agents, totalCount } = await detectAgents(parsed.owner, parsed.repo, branch, parsed.path, tree)
 
-  if (skills.length === 0) {
+  if (agents.length === 0) {
     throw createError({
       statusCode: 404,
-      data: { error: 'no_skills', message: 'No valid skill files found at this location' },
+      data: { error: 'no_agents', message: 'No valid agent files found at this location' },
     })
   }
 
-  // Check for conflicts with existing local skills
-  const skillsWithConflicts = skills.map(s => ({
-    ...s,
-    conflict: existsSync(resolveClaudePath('skills', s.slug, 'SKILL.md')),
+  // Check for conflicts with existing local agents
+  const agentsWithConflicts = agents.map(a => ({
+    ...a,
+    conflict: existsSync(resolveClaudePath('agents', a.slug + '.md')),
   }))
 
   return {
@@ -39,7 +50,8 @@ export default defineEventHandler(async (event) => {
     repo: parsed.repo,
     branch,
     targetPath: parsed.path || '',
-    skills: skillsWithConflicts,
-    detectionMethod,
+    agents: agentsWithConflicts,
+    totalAgents: totalCount,
+    detectionMethod: 'frontmatter',
   }
 })

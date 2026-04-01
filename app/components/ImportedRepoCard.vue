@@ -3,6 +3,7 @@ import type { GithubImport } from '~/types'
 
 const props = defineProps<{
   entry: GithubImport
+  type: 'skills' | 'agents'
 }>()
 
 const emit = defineEmits<{
@@ -11,85 +12,70 @@ const emit = defineEmits<{
   changed: []
 }>()
 
-const { getAvailableSkills, updateSelectedSkills } = useGithubImports()
+const { getAvailableItems, updateSelectedItems } = useGithubImports()
 const toast = useToast()
 
 const hasUpdate = computed(() => props.entry.currentSha !== props.entry.remoteSha)
 
 const editing = ref(false)
-const loadingSkills = ref(false)
+const loadingItems = ref(false)
 const saving = ref(false)
-const availableSkills = ref<{ slug: string; name: string; description: string; selected: boolean }[]>([])
-const selected = ref<Set<string>>(new Set())
+const availableItems = ref<{ slug: string; name: string; description: string; selected: boolean }[]>([])
+const selectedItems = ref<Set<string>>(new Set())
 
 const allSelected = computed(() => {
-  return availableSkills.value.length > 0 && selected.value.size === availableSkills.value.length
+  return availableItems.value.length > 0 && selectedItems.value.size === availableItems.value.length
 })
 
 async function startEditing() {
-  loadingSkills.value = true
+  loadingItems.value = true
   editing.value = true
   try {
-    const skills = await getAvailableSkills(props.entry.owner, props.entry.repo)
-    availableSkills.value = skills
-    selected.value = new Set(skills.filter(s => s.selected).map(s => s.slug))
+    const { skills, agents } = await getAvailableItems(props.entry.owner, props.entry.repo, props.type)
+    const items = props.type === 'skills' ? skills : agents
+    availableItems.value = items
+    selectedItems.value = new Set(items.filter(i => i.selected).map(i => i.slug))
   } catch {
-    toast.add({ title: 'Failed to load skills', color: 'error' })
+    toast.add({ title: 'Failed to load repository items', color: 'error' })
     editing.value = false
   } finally {
-    loadingSkills.value = false
+    loadingItems.value = false
   }
 }
 
-function toggleSkill(slug: string) {
-  if (selected.value.has(slug)) {
-    selected.value.delete(slug)
+function toggleItem(slug: string) {
+  if (selectedItems.value.has(slug)) {
+    selectedItems.value.delete(slug)
   } else {
-    selected.value.add(slug)
+    selectedItems.value.add(slug)
   }
-  selected.value = new Set(selected.value)
+  selectedItems.value = new Set(selectedItems.value)
 }
 
-function toggleAllSkills() {
-  if (!availableSkills.value.length) return
-
+function toggleAll() {
+  if (!availableItems.value.length) return
   if (allSelected.value) {
-    selected.value = new Set()
+    selectedItems.value = new Set()
   } else {
-    selected.value = new Set(availableSkills.value.map(s => s.slug))
+    selectedItems.value = new Set(availableItems.value.map(i => i.slug))
   }
 }
 
 async function saveSelection() {
   saving.value = true
   try {
-    const { symlinkSync } = await updateSelectedSkills(
+    await updateSelectedItems(
       props.entry.owner,
       props.entry.repo,
-      [...selected.value],
+      props.type,
+      [...selectedItems.value],
     )
-    const warnParts: string[] = []
-    if (symlinkSync.skippedConflicts.length) {
-      warnParts.push(
-        `${symlinkSync.skippedConflicts.length} folder(s) in ~/.claude/skills already exist (not overwritten)`,
-      )
-    }
-    if (symlinkSync.missingInClone.length) {
-      warnParts.push(
-        `${symlinkSync.missingInClone.length} could not be linked (missing in clone)`,
-      )
-    }
-    const linkBits: string[] = []
-    if (symlinkSync.linked.length) linkBits.push(`linked ${symlinkSync.linked.length}`)
-    if (symlinkSync.removed.length) linkBits.push(`removed ${symlinkSync.removed.length} symlink(s)`)
+    
     toast.add({
       title: 'Selection updated',
-      description: linkBits.length ? `${linkBits.join(', ')} under ~/.claude/skills` : undefined,
       color: 'success',
     })
-    if (warnParts.length) {
-      toast.add({ title: 'Symlinks', description: warnParts.join(' '), color: 'warning' })
-    }
+    
     editing.value = false
     emit('changed')
   } catch {
@@ -112,13 +98,14 @@ function formatDate(iso: string) {
           class="size-8 rounded-lg flex items-center justify-center shrink-0"
           style="background: var(--badge-subtle-bg); border: 1px solid var(--border-subtle);"
         >
-          <svg class="size-4 text-label" viewBox="0 0 16 16" fill="currentColor">
-            <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-          </svg>
+          <UIcon :name="type === 'skills' ? 'i-lucide-sparkles' : 'i-lucide-cpu'" class="size-4 text-label" />
         </div>
         <div class="flex-1 min-w-0">
           <div class="text-[13px] font-medium truncate">{{ entry.owner }}/{{ entry.repo }}</div>
-          <span class="text-[10px] text-meta">{{ entry.selectedSkills.length }} skill{{ entry.selectedSkills.length === 1 ? '' : 's' }} selected</span>
+          <div class="text-[10px] text-meta mt-0.5">
+            <strong>{{ entry.totalItems }}</strong> {{ type === 'skills' ? 'skills' : 'agents' }} found,
+            <strong>{{ entry.selectedItems?.length || 0 }}</strong> imported
+          </div>
         </div>
         <span
           v-if="hasUpdate"
@@ -135,42 +122,44 @@ function formatDate(iso: string) {
       </div>
 
       <!-- Edit selection panel -->
-      <div v-if="editing" class="space-y-2">
-        <div v-if="loadingSkills" class="flex items-center gap-2 py-2">
+      <div v-if="editing" class="space-y-3 pt-2 border-t mt-3" style="border-color: var(--border-subtle);">
+        <div v-if="loadingItems" class="flex items-center justify-center gap-2 py-4">
           <UIcon name="i-lucide-loader-2" class="size-3.5 animate-spin text-meta" />
-          <span class="text-[12px] text-label">Loading skills...</span>
+          <span class="text-[11px] text-label">Loading {{ type }}...</span>
         </div>
         <template v-else>
-          <div class="max-h-48 overflow-y-auto space-y-0.5 rounded-lg p-1" style="background: var(--surface-base);">
+          <!-- Items List -->
+          <div class="max-h-48 overflow-y-auto space-y-0.5 rounded-lg p-1 border" style="background: var(--surface-base); border-color: var(--border-subtle);">
             <label
-              v-for="skill in availableSkills"
-              :key="skill.slug"
+              v-for="item in availableItems"
+              :key="item.slug"
               class="flex items-start gap-2.5 px-2.5 py-2 rounded-lg cursor-pointer hover-row"
             >
               <input
                 type="checkbox"
-                :checked="selected.has(skill.slug)"
+                :checked="selectedItems.has(item.slug)"
                 class="mt-0.5 shrink-0"
-                @change="toggleSkill(skill.slug)"
+                @change="toggleItem(item.slug)"
               />
               <div class="flex-1 min-w-0">
-                <span class="text-[12px] font-medium">{{ skill.name }}</span>
-                <p class="text-[10px] text-label mt-0.5 line-clamp-1">{{ skill.description }}</p>
+                <span class="text-[12px] font-medium">{{ item.name }}</span>
+                <p class="text-[10px] text-label mt-0.5 line-clamp-1">{{ item.description }}</p>
               </div>
             </label>
+            <div v-if="availableItems.length === 0" class="py-8 text-center text-[11px] text-meta">No {{ type }} found in this repository</div>
           </div>
+
           <div class="flex justify-end gap-2">
             <UButton
               :label="allSelected ? 'Deselect all' : 'Select all'"
               size="xs"
               variant="ghost"
               color="neutral"
-              :disabled="availableSkills.length === 0"
-              @click="toggleAllSkills"
+              @click="toggleAll"
             />
             <UButton label="Cancel" variant="ghost" color="neutral" size="xs" @click="editing = false" />
             <UButton
-              :label="`Save (${selected.size})`"
+              :label="`Save (${selectedItems.size})`"
               size="xs"
               :loading="saving"
               @click="saveSelection"

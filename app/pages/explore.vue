@@ -4,7 +4,7 @@ import { commandTemplates } from "~/utils/commandTemplates";
 import { getAgentColor } from "~/utils/colors";
 import { getFriendlyModelName } from "~/utils/terminology";
 
-const { create: createAgent } = useAgents();
+const { create: createAgent, fetchAll: fetchAgents, agents } = useAgents();
 const { create: createCommand } = useCommands();
 const {
   plugins,
@@ -13,16 +13,48 @@ const {
   fetchAll: fetchPlugins,
   toggleEnabled,
 } = usePlugins();
-const { fetchAll: fetchSkills } = useSkills();
-const {
-  imports: githubImports,
-  loading: importsLoading,
-  updatesAvailable,
-  fetchImports,
-  checkUpdates,
-  updateImport,
-  removeImport,
-} = useGithubImports();
+const { fetchAll: fetchSkills, skills } = useSkills();
+const github = useGithubImports();
+const skillImports = github.skillImports;
+const agentImports = github.agentImports;
+const importsLoading = github.loading;
+const skillUpdatesAvailable = github.skillUpdatesAvailable;
+const agentUpdatesAvailable = github.agentUpdatesAvailable;
+const fetchImports = github.fetchImports;
+const checkUpdates = github.checkUpdates;
+const updateImport = github.updateImport;
+const removeImport = github.removeImport;
+
+const searchQuery = ref("");
+
+const filteredSkillImports = computed(() => {
+  const list = skillImports?.value || []
+  if (!searchQuery.value) return list
+  const q = searchQuery.value.toLowerCase()
+  return list.filter(i => 
+    i.owner.toLowerCase().includes(q) || 
+    i.repo.toLowerCase().includes(q)
+  )
+})
+
+const filteredAgentImports = computed(() => {
+  const list = agentImports?.value || []
+  if (!searchQuery.value) return list
+  const q = searchQuery.value.toLowerCase()
+  return list.filter(i => 
+    i.owner.toLowerCase().includes(q) || 
+    i.repo.toLowerCase().includes(q)
+  )
+})
+
+const importedAgentRepos = computed(() => {
+  return filteredAgentImports.value.filter(i => (i.totalItems && i.totalItems > 0) || (i.selectedItems && i.selectedItems.length > 0))
+})
+
+const importedSkillRepos = computed(() => {
+  return filteredSkillImports.value.filter(i => (i.totalItems && i.totalItems > 0) || (i.selectedItems && i.selectedItems.length > 0))
+})
+
 const {
   marketplaceData,
   sources: marketplaceSources,
@@ -42,16 +74,42 @@ const route = useRoute();
 const toast = useToast();
 
 const creating = ref<string | null>(null);
-const searchQuery = ref("");
-const activeTab = ref<"templates" | "marketplace" | "imported">(
+const activeTab = ref<"templates" | "marketplace" | "import-agent" | "import-skill">(
   route.query.tab === "marketplace"
     ? "marketplace"
-    : route.query.tab === "imported"
-      ? "imported"
-      : "templates",
+    : route.query.tab === "import-agent"
+      ? "import-agent"
+      : route.query.tab === "import-skill"
+        ? "import-skill"
+        : "templates",
 );
 const previewId = ref<string | null>(null);
-const showImportModal = ref(false);
+const showImportSkillsModal = ref(false);
+const showImportAgentsModal = ref(false);
+const showRemoveConfirm = ref(false);
+const repoToRemove = ref<{ owner: string; repo: string; type: 'skills' | 'agents'; count: number } | null>(null);
+
+// Computed for imported agents
+const importedAgents = computed(() => {
+  const filtered = agents.value.filter(a => a.filePath?.includes('/github/'))
+  if (!searchQuery.value) return filtered
+  const q = searchQuery.value.toLowerCase()
+  return filtered.filter(a => 
+    a.frontmatter.name.toLowerCase().includes(q) || 
+    a.frontmatter.description.toLowerCase().includes(q)
+  )
+})
+
+// Computed for imported skills
+const importedSkills = computed(() => {
+  const filtered = skills.value.filter(s => s.filePath?.includes('/github/'))
+  if (!searchQuery.value) return filtered
+  const q = searchQuery.value.toLowerCase()
+  return filtered.filter(s => 
+    (s.frontmatter.name || s.slug).toLowerCase().includes(q) || 
+    s.frontmatter.description.toLowerCase().includes(q)
+  )
+})
 const showAddMarketplaceModal = ref(false);
 const installingPlugin = ref<string | null>(null);
 const uninstallingPlugin = ref<string | null>(null);
@@ -298,27 +356,54 @@ onMounted(() => {
 });
 
 onMounted(async () => {
-  await fetchImports();
-  checkUpdates();
+  await Promise.all([
+    fetchImports('skills'),
+    fetchImports('agents')
+  ]);
+  checkUpdates('skills');
+  checkUpdates('agents');
 });
 
 async function onUpdate(owner: string, repo: string) {
+  const type = activeTab.value === 'import-skill' ? 'skills' : 'agents';
   try {
-    await updateImport(owner, repo);
+    await updateImport(owner, repo, type);
     toast.add({ title: "Import updated", color: "success" });
     fetchSkills();
+    fetchAgents();
   } catch {
     toast.add({ title: "Failed to update", color: "error" });
   }
 }
 
 async function onRemove(owner: string, repo: string) {
+  const type = activeTab.value === 'import-skill' ? 'skills' : 'agents';
+  const list = type === 'skills' ? skillImports : agentImports;
+  const entry = list.value.find(i => i.owner === owner && i.repo === repo);
+  
+  repoToRemove.value = {
+    owner,
+    repo,
+    type,
+    count: entry?.selectedItems?.length || 0
+  };
+  showRemoveConfirm.value = true;
+}
+
+async function confirmRemove() {
+  if (!repoToRemove.value) return;
+  const { owner, repo, type } = repoToRemove.value;
+  
   try {
-    await removeImport(owner, repo);
+    await removeImport(owner, repo, type);
     toast.add({ title: "Import removed", color: "success" });
     fetchSkills();
+    fetchAgents();
   } catch {
     toast.add({ title: "Failed to remove", color: "error" });
+  } finally {
+    showRemoveConfirm.value = false;
+    repoToRemove.value = null;
   }
 }
 
@@ -339,13 +424,22 @@ function scrollToMarketplace(name: string) {
         >
       </template>
       <template #right>
-        <UButton
-          label="Import from GitHub"
-          icon="i-lucide-github"
-          size="sm"
-          variant="soft"
-          @click="showImportModal = true"
-        />
+        <div class="flex items-center gap-2">
+          <UButton
+            label="Import Skills"
+            icon="i-lucide-github"
+            size="sm"
+            variant="soft"
+            @click="showImportSkillsModal = true"
+          />
+          <UButton
+            label="Import Agent"
+            icon="i-lucide-users"
+            size="sm"
+            variant="soft"
+            @click="showImportAgentsModal = true"
+          />
+        </div>
       </template>
     </PageHeader>
 
@@ -377,6 +471,42 @@ function scrollToMarketplace(name: string) {
           class="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all"
           :style="{
             background:
+              activeTab === 'import-agent' ? 'var(--surface-base)' : 'transparent',
+            color:
+              activeTab === 'import-agent'
+                ? 'var(--text-primary)'
+                : 'var(--text-tertiary)',
+            boxShadow:
+              activeTab === 'import-agent'
+                ? '0 1px 3px var(--card-shadow)'
+                : 'none',
+          }"
+          @click="activeTab = 'import-agent'"
+        >
+          Imported Agents
+        </button>
+        <button
+          class="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all"
+          :style="{
+            background:
+              activeTab === 'import-skill' ? 'var(--surface-base)' : 'transparent',
+            color:
+              activeTab === 'import-skill'
+                ? 'var(--text-primary)'
+                : 'var(--text-tertiary)',
+            boxShadow:
+              activeTab === 'import-skill'
+                ? '0 1px 3px var(--card-shadow)'
+                : 'none',
+          }"
+          @click="activeTab = 'import-skill'"
+        >
+          Imported Skills
+        </button>
+        <button
+          class="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all"
+          :style="{
+            background:
               activeTab === 'marketplace'
                 ? 'var(--surface-base)'
                 : 'transparent',
@@ -393,43 +523,75 @@ function scrollToMarketplace(name: string) {
         >
           Marketplace ({{ availablePlugins.length }})
         </button>
-        <button
-          class="px-3 py-1.5 rounded-md text-[12px] font-medium transition-all"
-          :style="{
-            background:
-              activeTab === 'imported' ? 'var(--surface-base)' : 'transparent',
-            color:
-              activeTab === 'imported'
-                ? 'var(--text-primary)'
-                : 'var(--text-tertiary)',
-            boxShadow:
-              activeTab === 'imported'
-                ? '0 1px 3px var(--card-shadow)'
-                : 'none',
-          }"
-          @click="activeTab = 'imported'"
-        >
-          Imported ({{ githubImports.length }})
-          <span
-            v-if="updatesAvailable > 0"
-            class="ml-1 inline-flex items-center justify-center size-4 rounded-full text-[9px] font-bold text-white"
-            style="background: var(--info, #3b82f6)"
-          >
-            {{ updatesAvailable }}
-          </span>
-        </button>
       </div>
+<!-- Search -->
+<input
+  v-model="searchQuery"
+  :placeholder="
+    activeTab === 'templates'
+      ? 'Search templates...'
+      : activeTab === 'import-agent'
+        ? 'Search imported agents...'
+        : activeTab === 'import-skill'
+          ? 'Search imported skills...'
+          : 'Search marketplace...'
+  "
+  class="field-search max-w-xs"
+/>
+      <!-- Import Agent Tab -->
+      <template v-if="activeTab === 'import-agent'">
+        <div class="flex items-center justify-between">
+          <p class="text-[13px] leading-relaxed text-label">
+            Agents imported from GitHub repositories.
+          </p>
+          <UButton
+            label="Import new Agent"
+            icon="i-lucide-plus"
+            size="xs"
+            variant="soft"
+            @click="showImportAgentsModal = true"
+          />
+        </div>
 
-      <!-- Search -->
-      <input
-        v-model="searchQuery"
-        :placeholder="
-          activeTab === 'templates'
-            ? 'Search templates...'
-            : 'Search marketplace...'
-        "
-        class="field-search max-w-xs"
-      />
+        <div
+          v-if="importsLoading"
+          class="space-y-1"
+        >
+          <SkeletonRow
+            v-for="i in 3"
+            :key="i"
+          />
+        </div>
+
+        <div v-else-if="importedAgentRepos.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+          <ImportedRepoCard
+            v-for="entry in importedAgentRepos"
+            :key="`${entry.owner}/${entry.repo}`"
+            :entry="entry"
+            type="agents"
+            @update="onUpdate"
+            @remove="onRemove"
+            @changed="() => { fetchImports('agents'); fetchAgents(); }"
+          />
+        </div>
+
+        <div v-else class="text-center py-16 space-y-4">
+          <div class="size-16 mx-auto rounded-full flex items-center justify-center bg-surface-raised">
+            <UIcon name="i-lucide-users" class="size-8 text-meta" />
+          </div>
+          <div class="space-y-1">
+            <p class="text-[14px] font-medium">No imported agents yet</p>
+            <p class="text-[12px] text-label max-w-xs mx-auto">
+              Import specialized agents from GitHub repositories to expand your assistant's capabilities.
+            </p>
+          </div>
+          <UButton
+            label="Import your first Agent"
+            icon="i-lucide-plus"
+            @click="showImportAgentsModal = true"
+          />
+        </div>
+      </template>
 
       <!-- Templates Tab -->
       <template v-if="activeTab === 'templates'">
@@ -613,12 +775,20 @@ function scrollToMarketplace(name: string) {
         </div>
       </template>
 
-      <!-- Imported Tab -->
-      <template v-if="activeTab === 'imported'">
-        <p class="text-[13px] leading-relaxed text-label">
-          Skills imported from GitHub repositories. Updates are checked
-          automatically.
-        </p>
+      <!-- Import Skill Tab -->
+      <template v-if="activeTab === 'import-skill'">
+        <div class="flex items-center justify-between">
+          <p class="text-[13px] leading-relaxed text-label">
+            Skill repositories imported from GitHub.
+          </p>
+          <UButton
+            label="Import new Skill"
+            icon="i-lucide-plus"
+            size="xs"
+            variant="soft"
+            @click="showImportSkillsModal = true"
+          />
+        </div>
 
         <div
           v-if="importsLoading"
@@ -630,42 +800,33 @@ function scrollToMarketplace(name: string) {
           />
         </div>
 
-        <div
-          v-else-if="githubImports.length"
-          class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3"
-        >
+        <div v-else-if="importedSkillRepos.length" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
           <ImportedRepoCard
-            v-for="entry in githubImports"
+            v-for="entry in importedSkillRepos"
             :key="`${entry.owner}/${entry.repo}`"
             :entry="entry"
+            type="skills"
             @update="onUpdate"
             @remove="onRemove"
-            @changed="() => { fetchImports(); fetchSkills(); }"
+            @changed="() => { fetchImports('skills'); fetchSkills(); }"
           />
         </div>
 
-        <div
-          v-else
-          class="text-center py-12 space-y-4"
-        >
-          <div
-            class="size-12 mx-auto rounded-full flex items-center justify-center"
-            style="background: var(--badge-subtle-bg)"
-          >
-            <svg
-              class="size-6 text-meta"
-              viewBox="0 0 16 16"
-              fill="currentColor"
-            >
-              <path
-                d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"
-              />
-            </svg>
+        <div v-else class="text-center py-16 space-y-4">
+          <div class="size-16 mx-auto rounded-full flex items-center justify-center bg-surface-raised">
+            <UIcon name="i-lucide-sparkles" class="size-8 text-meta" />
           </div>
-          <p class="text-[13px] text-label">
-            No GitHub imports yet. Use the button above to import skills from a
-            repository.
-          </p>
+          <div class="space-y-1">
+            <p class="text-[14px] font-medium">No imported skills yet</p>
+            <p class="text-[12px] text-label max-w-xs mx-auto">
+              Import specialized skills from GitHub repositories to give your agents new capabilities.
+            </p>
+          </div>
+          <UButton
+            label="Import your first Skill"
+            icon="i-lucide-plus"
+            @click="showImportSkillsModal = true"
+          />
         </div>
       </template>
 
@@ -865,13 +1026,27 @@ function scrollToMarketplace(name: string) {
       </template>
     </div>
 
-    <UModal v-model:open="showImportModal">
+    <UModal v-model:open="showImportSkillsModal">
       <template #content>
         <GithubImportModal
+          type="skills"
           @imported="
-            showImportModal = false;
-            fetchImports();
+            showImportSkillsModal = false;
+            fetchImports('skills');
             fetchSkills();
+          "
+        />
+      </template>
+    </UModal>
+
+    <UModal v-model:open="showImportAgentsModal">
+      <template #content>
+        <GithubImportModal
+          type="agents"
+          @imported="
+            showImportAgentsModal = false;
+            fetchImports('agents');
+            fetchAgents();
           "
         />
       </template>
@@ -880,6 +1055,46 @@ function scrollToMarketplace(name: string) {
     <UModal v-model:open="showAddMarketplaceModal">
       <template #content>
         <AddMarketplaceModal @added="showAddMarketplaceModal = false; fetchSources(); fetchAvailable()" />
+      </template>
+    </UModal>
+
+    <!-- Delete Confirmation Modal -->
+    <UModal v-model:open="showRemoveConfirm">
+      <template #content>
+        <div class="p-6 space-y-4 bg-overlay">
+          <div class="flex items-center gap-3">
+            <div class="size-10 rounded-full flex items-center justify-center shrink-0" style="background: rgba(239, 68, 68, 0.1);">
+              <UIcon name="i-lucide-alert-triangle" class="size-6 text-error" />
+            </div>
+            <div>
+              <h3 class="text-[15px] font-semibold text-primary">Remove Repository?</h3>
+              <p class="text-[12px] text-label mt-1">This action cannot be undone.</p>
+            </div>
+          </div>
+
+          <div class="rounded-lg p-3 border" style="background: var(--surface-base); border-color: var(--border-subtle);">
+            <p class="text-[13px] leading-relaxed">
+              Removing <span class="font-mono font-bold">{{ repoToRemove?.owner }}/{{ repoToRemove?.repo }}</span> will delete the local clone and unlink 
+              <strong class="text-error">{{ repoToRemove?.count }} {{ repoToRemove?.type }}</strong> currently installed on your system.
+            </p>
+          </div>
+
+          <div class="flex justify-end gap-3 pt-2">
+            <UButton
+              label="Cancel"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              @click="showRemoveConfirm = false"
+            />
+            <UButton
+              label="Confirm Delete"
+              color="error"
+              size="sm"
+              @click="confirmRemove"
+            />
+          </div>
+        </div>
       </template>
     </UModal>
   </div>

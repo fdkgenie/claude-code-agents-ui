@@ -137,7 +137,7 @@ export default defineEventHandler(async (event) => {
   const githubDir = resolveClaudePath('github')
   if (existsSync(githubDir)) {
     const { readImportsRegistry } = await import('../../utils/github')
-    const registry = await readImportsRegistry()
+    const registry = await readImportsRegistry('skills')
 
     for (const entry of registry.imports) {
       if (!existsSync(entry.localPath)) continue
@@ -152,7 +152,7 @@ export default defineEventHandler(async (event) => {
       const slugClaimed = (slug: string) => skills.some(s => s.slug === slug)
 
       const shouldIncludeSkill = (slug: string) => {
-        return entry.selectedSkills.includes(slug)
+        return entry.selectedItems?.includes(slug) || false
       }
 
       // Prefer skills-index.json when present so we match the same slug resolution

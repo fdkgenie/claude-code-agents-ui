@@ -1,7 +1,12 @@
-export default defineEventHandler(async (event) => {
-  const { owner, repo } = await readBody<{ owner: string; repo: string }>(event)
+import { readImportsRegistry, writeImportsRegistry, findImport } from '../../utils/github'
+import { gitPull, gitGetHead, gitDiffFiles } from '../../utils/gitOps'
 
-  const registry = await readImportsRegistry()
+export default defineEventHandler(async (event) => {
+  const { owner, repo, type } = await readBody<{ owner: string; repo: string; type: 'skills' | 'agents' }>(event)
+
+  if (!type) throw createError({ statusCode: 400, message: 'type is required' })
+
+  const registry = await readImportsRegistry(type)
   const entry = findImport(registry, owner, repo)
 
   if (!entry) {
@@ -17,7 +22,7 @@ export default defineEventHandler(async (event) => {
   entry.remoteSha = newSha
   entry.lastChecked = new Date().toISOString()
 
-  await writeImportsRegistry(registry)
+  await writeImportsRegistry(type, registry)
 
   return { entry, changedFiles }
 })

@@ -2,33 +2,36 @@ import { readdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import { parseFrontmatter } from '../../utils/frontmatter'
-import { syncGithubImportSkillSymlinks } from '../../utils/githubSkillSymlinks'
+import { syncGithubImportSymlinks } from '../../utils/githubSkillSymlinks'
 import type { SkillFrontmatter } from '~/types'
 
 export default defineEventHandler(async (event) => {
-  const { owner, repo, selectedSkills } = await readBody<{
+  const { owner, repo, selectedItems, type } = await readBody<{
     owner: string
     repo: string
-    selectedSkills?: string[]
+    selectedItems?: string[]
+    type: 'skills' | 'agents'
   }>(event)
 
-  const registry = await readImportsRegistry()
+  if (!type) throw createError({ statusCode: 400, message: 'type is required' })
+
+  const registry = await readImportsRegistry(type)
   const entry = findImport(registry, owner, repo)
 
   if (!entry) {
     throw createError({ statusCode: 404, message: 'Import not found' })
   }
 
-  // If selectedSkills provided, update them
-  if (selectedSkills !== undefined) {
-    const previousSlugs = [...entry.selectedSkills]
-    entry.selectedSkills = selectedSkills
-    await writeImportsRegistry(registry)
-    const symlinkSync = await syncGithubImportSkillSymlinks(entry, previousSlugs, selectedSkills)
+  // If selectedItems provided, update them
+  if (selectedItems !== undefined) {
+    const previousItems = [...entry.selectedItems]
+    entry.selectedItems = selectedItems
+    await writeImportsRegistry(type, registry)
+    const symlinkSync = await syncGithubImportSymlinks(entry, previousItems, entry.selectedItems, type)
     return { entry, symlinkSync }
   }
 
-  // Otherwise, scan local clone for all available skills and return them
+  // Otherwise, scan local clone for all available skills and agents and return them
   const scanRoot = entry.targetPath
     ? join(entry.localPath, entry.targetPath)
     : entry.localPath
@@ -38,6 +41,7 @@ export default defineEventHandler(async (event) => {
   }
 
   const availableSkills: { slug: string; name: string; description: string; selected: boolean }[] = []
+  const availableAgents: { slug: string; name: string; description: string; selected: boolean }[] = []
 
   // Prefer skills-index.json when present so slug/metadata matches the import workflow.
   // (This also avoids a potentially expensive full markdown scan.)
@@ -82,18 +86,18 @@ export default defineEventHandler(async (event) => {
           slug: s.slug,
           name: s.name,
           description: s.description,
-          selected: entry.selectedSkills.includes(s.slug),
+          selected: entry.selectedItems?.includes(s.slug) || false,
         })
       }
 
-      return { entry, availableSkills: availableSkills.sort((a, b) => a.name.localeCompare(b.name)) }
+      // If we found skills via index, we still return them, but we might also want to scan for agents
+      // as skills-index.json usually only contains skills.
     } catch {
       // Fall through to filesystem scan.
     }
   }
 
-  // Fallback: scan for markdown skill files on disk and use frontmatter.name/description.
-  // This supports repos where skills are not structured as `/<skill-slug>/SKILL.md`.
+  // Fallback: scan for markdown skill/agent files on disk and use frontmatter.name/description.
   const SKIP_FILENAMES = new Set<string>([
     'README.md', 'readme.md',
     'CHANGELOG.md', 'changelog.md',
@@ -103,7 +107,8 @@ export default defineEventHandler(async (event) => {
   ])
 
   const skipLower = new Set([...SKIP_FILENAMES].map(s => s.toLowerCase()))
-  const dedup = new Map<string, { slug: string; name: string; description: string; selected: boolean }>()
+  const skillDedup = new Map<string, { slug: string; name: string; description: string; selected: boolean }>()
+  const agentDedup = new Map<string, { slug: string; name: string; description: string; selected: boolean }>()
 
   const walk = async (dir: string) => {
     const items = await readdir(dir, { withFileTypes: true })
@@ -121,40 +126,83 @@ export default defineEventHandler(async (event) => {
       if (skipLower.has(item.name.toLowerCase())) continue
 
       const raw = await readFile(fullPath, 'utf-8')
-      const { frontmatter } = parseFrontmatter<SkillFrontmatter>(raw)
+      const { frontmatter } = parseFrontmatter<any>(raw)
       if (!frontmatter.name || !frontmatter.description) continue
 
       const rel = relative(scanRoot, fullPath)
       const parts = rel.split(/[\\/]/).filter(Boolean)
       const fileName = parts.at(-1) || item.name
-      const parentDir = parts.length >= 2 ? parts.at(-2) : undefined
-
-      let slug = (fileName.toLowerCase() === 'skill.md' && parentDir)
-        ? parentDir
-        : fileName.replace(/\.md$/i, '')
-
-      if ((slug.toLowerCase() === 'skill' || !slug) && frontmatter.name) {
-        slug = frontmatter.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+      const isSkillFile = fileName.toLowerCase() === 'skill.md'
+      
+      // Detect Agent
+      // Any .md file with name and description is a valid agent, UNLESS it's a SKILL.md
+      if (!isSkillFile) {
+        let slug = fileName.replace(/\.md$/i, '')
+        if (slug.toLowerCase() === 'agent' && parts.length >= 2) {
+          slug = parts[parts.length - 2]!
+        }
+        if (!slug) continue
+        if (!agentDedup.has(slug)) {
+          agentDedup.set(slug, {
+            slug,
+            name: frontmatter.name,
+            description: frontmatter.description,
+            selected: entry.selectedItems?.includes(slug) || false,
+          })
+        }
       }
 
-      if (!slug) continue
+      // Detect Skill (only if not already found in index)
+      const skillSlug = (isSkillFile && parts.length >= 2)
+        ? parts.at(-2)!
+        : fileName.replace(/\.md$/i, '')
 
-      // Avoid duplicates if a repo has multiple md files representing the same skill.
-      if (!dedup.has(slug)) {
-        dedup.set(slug, {
-          slug,
-          name: frontmatter.name,
-          description: frontmatter.description,
-          selected: entry.selectedSkills.includes(slug),
-        })
+      if (isSkillFile || !availableSkills.find(s => s.slug === skillSlug)) {
+        let slug = skillSlug
+
+        if ((slug.toLowerCase() === 'skill' || !slug) && frontmatter.name) {
+          slug = frontmatter.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
+        }
+
+        if (slug && !skillDedup.has(slug)) {
+          skillDedup.set(slug, {
+            slug,
+            name: frontmatter.name,
+            description: frontmatter.description,
+            selected: entry.selectedItems?.includes(slug) || false,
+          })
+        }
       }
     }
   }
 
   await walk(scanRoot)
 
-  for (const v of dedup.values()) availableSkills.push(v)
+  // Only add if not already present (from index)
+  for (const v of skillDedup.values()) {
+    if (!availableSkills.find(s => s.slug === v.slug)) {
+      availableSkills.push(v)
+    }
+  }
+  for (const v of agentDedup.values()) availableAgents.push(v)
 
   availableSkills.sort((a, b) => a.name.localeCompare(b.name))
-  return { entry, availableSkills }
+  availableAgents.sort((a, b) => a.name.localeCompare(b.name))
+  
+  // Update totals in registry if they changed
+  let changed = false
+  const currentTotal = type === 'skills' ? availableSkills.length : availableAgents.length
+  if (entry.totalItems !== currentTotal) {
+    entry.totalItems = currentTotal
+    changed = true
+  }
+  if (changed) {
+    await writeImportsRegistry(type, registry)
+  }
+  
+  return { 
+    entry, 
+    availableSkills,
+    availableAgents
+  }
 })

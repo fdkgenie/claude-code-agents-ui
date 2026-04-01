@@ -29,6 +29,7 @@ const frontmatter = ref<AgentFrontmatter>({
   color: source?.frontmatter.color,
   memory: source?.frontmatter.memory,
   skills: source?.frontmatter.skills || [],
+  tools: source?.frontmatter.tools || [],
 });
 
 onMounted(() => {
@@ -58,6 +59,30 @@ function toggleSkill(slug: string) {
 }
 
 const body = ref(source?.body || "");
+
+const toolOptions: { label: string; value: AgentTool; icon: string }[] = [
+  { label: 'Read', value: 'Read', icon: 'i-lucide-book-open' },
+  { label: 'Grep', value: 'Grep', icon: 'i-lucide-search' },
+  { label: 'Glob', value: 'Glob', icon: 'i-lucide-files' },
+  { label: 'Bash', value: 'Bash', icon: 'i-lucide-terminal' },
+  { label: 'Write', value: 'Write', icon: 'i-lucide-pencil-line' },
+  { label: 'Edit', value: 'Edit', icon: 'i-lucide-file-text' },
+]
+
+const memoryOptions: { label: string; value: AgentMemory; description: string }[] = [
+  { label: 'User', value: 'user', description: 'Global memory at ~/.claude/agent-memory/' },
+  { label: 'Project', value: 'project', description: 'Project-specific persistent memory' },
+  { label: 'Local', value: 'local', description: 'Memory stored in current directory' },
+  { label: 'None', value: 'none', description: 'Do not persist learnings' },
+]
+
+function toggleTool(tool: AgentTool) {
+  const tools = [...(frontmatter.value.tools || [])]
+  const idx = tools.indexOf(tool)
+  if (idx === -1) tools.push(tool)
+  else tools.splice(idx, 1)
+  frontmatter.value.tools = tools
+}
 
 const errors = computed(() => {
   const e: Record<string, string> = {};
@@ -170,23 +195,57 @@ async function save() {
     </div>
 
     <div class="field-group">
-      <label
-        class="field-label"
-        data-required
-        >Description</label
-      >
+      <label class="field-label" data-required>Description</label>
       <textarea
         v-model="frontmatter.description"
-        rows="4"
+        rows="3"
         class="field-textarea"
         :class="{ 'field-input--error': fieldError('description') }"
         placeholder="When to use this agent..."
       />
-      <span
-        v-if="fieldError('description')"
-        class="field-error"
-        >{{ fieldError("description") }}</span
-      >
+    </div>
+
+    <div class="field-group">
+      <label class="field-label">Persistent Memory</label>
+      <div class="flex flex-wrap gap-2 mt-1.5">
+        <button
+          v-for="opt in memoryOptions"
+          :key="opt.value"
+          type="button"
+          class="px-2.5 py-1.5 rounded-lg border text-[11px] font-medium transition-all"
+          :style="{
+            background: frontmatter.memory === opt.value ? 'var(--accent-muted)' : 'transparent',
+            borderColor: frontmatter.memory === opt.value ? 'var(--accent)' : 'var(--border-subtle)',
+            color: frontmatter.memory === opt.value ? 'var(--accent)' : 'var(--text-secondary)'
+          }"
+          @click="frontmatter.memory = opt.value"
+        >
+          {{ opt.label }}
+        </button>
+      </div>
+      <span class="field-hint mt-1.5">Where should this agent store its learnings?</span>
+    </div>
+
+    <div class="field-group">
+      <label class="field-label">Allowed Tools</label>
+      <div class="flex flex-wrap gap-2 mt-1.5">
+        <button
+          v-for="tool in toolOptions"
+          :key="tool.value"
+          type="button"
+          class="flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-[11px] transition-all"
+          :style="{
+            background: frontmatter.tools?.includes(tool.value) ? 'var(--accent-muted)' : 'transparent',
+            borderColor: frontmatter.tools?.includes(tool.value) ? 'var(--accent)' : 'var(--border-subtle)',
+            color: frontmatter.tools?.includes(tool.value) ? 'var(--accent)' : 'var(--text-secondary)'
+          }"
+          @click="toggleTool(tool.value)"
+        >
+          <UIcon :name="tool.icon" class="size-3.5" />
+          {{ tool.label }}
+          <UIcon v-if="frontmatter.tools?.includes(tool.value)" name="i-lucide-check" class="size-3" />
+        </button>
+      </div>
     </div>
 
     <div class="field-group">

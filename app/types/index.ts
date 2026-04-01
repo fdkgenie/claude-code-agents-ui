@@ -1,5 +1,6 @@
 export type AgentModel = 'opus' | 'sonnet' | 'haiku'
-export type AgentMemory = 'user' | 'project' | 'none'
+export type AgentMemory = 'user' | 'project' | 'local' | 'none'
+export type AgentTool = 'Read' | 'Grep' | 'Glob' | 'Bash' | 'Write' | 'Edit'
 
 export interface AgentFrontmatter {
   name: string
@@ -8,6 +9,7 @@ export interface AgentFrontmatter {
   color?: string
   memory?: AgentMemory
   skills?: string[]
+  tools?: AgentTool[]
 }
 
 export interface Agent {
@@ -133,13 +135,32 @@ export interface ScannedSkill {
   conflict: boolean
 }
 
-export interface ScanResult {
+export interface ScannedAgent {
+  slug: string
+  name: string
+  description: string
+  filePath: string
+  conflict: boolean
+}
+
+export interface SkillScanResult {
   owner: string
   repo: string
   branch: string
   targetPath: string
   skills: ScannedSkill[]
+  totalSkills: number
   detectionMethod: 'frontmatter' | 'skills-index'
+}
+
+export interface AgentScanResult {
+  owner: string
+  repo: string
+  branch: string
+  targetPath: string
+  agents: ScannedAgent[]
+  totalAgents: number
+  detectionMethod: 'frontmatter'
 }
 
 export interface GithubImport {
@@ -152,7 +173,8 @@ export interface GithubImport {
   lastChecked: string
   currentSha: string
   remoteSha: string
-  selectedSkills: string[]
+  selectedItems: string[]
+  totalItems: number
 }
 
 export interface GithubImportsRegistry {

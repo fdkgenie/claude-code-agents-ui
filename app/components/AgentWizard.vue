@@ -20,6 +20,7 @@ const frontmatter = ref<AgentFrontmatter>({
   description: '',
   model: DEFAULT_MODEL,
   skills: [],
+  tools: [],
 })
 const body = ref('')
 
@@ -67,11 +68,29 @@ async function finish() {
   }
 }
 
-const memoryOptions: { value: AgentMemory | undefined; label: string; desc: string }[] = [
-  { value: undefined, label: 'No memory', desc: 'Starts fresh every conversation. Good for stateless tasks.' },
-  { value: 'user', label: 'Per person', desc: 'Remembers your preferences and style across conversations.' },
-  { value: 'project', label: 'Per project', desc: "Remembers context about the project it's working on." },
+const memoryOptions: { value: AgentMemory; label: string; desc: string }[] = [
+  { value: 'user', label: 'User Scope', desc: 'Accumulates insights at ~/.claude/agent-memory/.' },
+  { value: 'project', label: 'Project Scope', desc: "Remembers codebase patterns for this project." },
+  { value: 'local', label: 'Local Scope', desc: 'Stores learnings in the current directory.' },
+  { value: 'none', label: 'None', desc: 'Starts fresh every time. No persistent learnings.' },
 ]
+
+const toolOptions: { label: string; value: AgentTool; icon: string; desc: string }[] = [
+  { label: 'Read', value: 'Read', icon: 'i-lucide-book-open', desc: 'Read file contents' },
+  { label: 'Grep', value: 'Grep', icon: 'i-lucide-search', desc: 'Search inside files' },
+  { label: 'Glob', value: 'Glob', icon: 'i-lucide-files', desc: 'Find files by pattern' },
+  { label: 'Bash', value: 'Bash', icon: 'i-lucide-terminal', desc: 'Execute shell commands' },
+  { label: 'Write', value: 'Write', icon: 'i-lucide-pencil-line', desc: 'Create or overwrite files' },
+  { label: 'Edit', value: 'Edit', icon: 'i-lucide-file-text', desc: 'Edit specific lines in files' },
+]
+
+function toggleTool(tool: AgentTool) {
+  const tools = [...(frontmatter.value.tools || [])]
+  const idx = tools.indexOf(tool)
+  if (idx === -1) tools.push(tool)
+  else tools.splice(idx, 1)
+  frontmatter.value.tools = tools
+}
 </script>
 
 
@@ -204,6 +223,38 @@ const memoryOptions: { value: AgentMemory | undefined; label: string; desc: stri
               <span class="text-[13px] font-medium">{{ opt.label }}</span>
               <p class="text-[11px] text-label mt-0.5">{{ opt.desc }}</p>
             </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Tools sub-section -->
+      <div class="space-y-3 pt-2 border-t" style="border-color: var(--border-subtle);">
+        <label class="field-label">Allowed Tools</label>
+        <div class="grid grid-cols-2 gap-2">
+          <button
+            v-for="tool in toolOptions"
+            :key="tool.value"
+            type="button"
+            class="flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all border text-left"
+            :style="{
+              background: frontmatter.tools?.includes(tool.value) ? 'var(--accent-muted)' : 'transparent',
+              borderColor: frontmatter.tools?.includes(tool.value) ? 'var(--accent)' : 'var(--border-subtle)',
+            }"
+            @click="toggleTool(tool.value)"
+          >
+            <div 
+              class="size-7 rounded-lg flex items-center justify-center shrink-0"
+              :style="{ 
+                background: frontmatter.tools?.includes(tool.value) ? 'rgba(229, 169, 62, 0.1)' : 'var(--surface-raised)',
+                color: frontmatter.tools?.includes(tool.value) ? 'var(--accent)' : 'var(--text-tertiary)'
+              }"
+            >
+              <UIcon :name="tool.icon" class="size-3.5" />
+            </div>
+            <div class="text-[12px] font-medium" :style="{ color: frontmatter.tools?.includes(tool.value) ? 'var(--text-primary)' : 'var(--text-secondary)' }">
+              {{ tool.label }}
+            </div>
+            <UIcon v-if="frontmatter.tools?.includes(tool.value)" name="i-lucide-check" class="size-3 ml-auto" style="color: var(--accent);" />
           </button>
         </div>
       </div>

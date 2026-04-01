@@ -1,9 +1,13 @@
-import { syncGithubImportSkillSymlinks } from '../../utils/githubSkillSymlinks'
+import { readImportsRegistry, writeImportsRegistry, findImport } from '../../utils/github'
+import { removeClone } from '../../utils/gitOps'
+import { syncGithubImportSymlinks } from '../../utils/githubSkillSymlinks'
 
 export default defineEventHandler(async (event) => {
-  const { owner, repo } = await readBody<{ owner: string; repo: string }>(event)
+  const { owner, repo, type } = await readBody<{ owner: string; repo: string; type: 'skills' | 'agents' }>(event)
 
-  const registry = await readImportsRegistry()
+  if (!type) throw createError({ statusCode: 400, message: 'type is required' })
+
+  const registry = await readImportsRegistry(type)
   const entry = findImport(registry, owner, repo)
 
   if (!entry) {
@@ -11,14 +15,14 @@ export default defineEventHandler(async (event) => {
   }
 
   try {
-    await syncGithubImportSkillSymlinks(entry, [...entry.selectedSkills], [])
+    await syncGithubImportSymlinks(entry, [...entry.selectedItems], [], type)
   } catch {
     // Best-effort: remove skill symlinks pointing at this clone before deleting it.
   }
 
   await removeClone(entry.localPath)
   registry.imports = registry.imports.filter(i => !(i.owner === owner && i.repo === repo))
-  await writeImportsRegistry(registry)
+  await writeImportsRegistry(type, registry)
 
   return { success: true }
 })

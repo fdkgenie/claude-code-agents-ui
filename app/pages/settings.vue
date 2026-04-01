@@ -3,18 +3,29 @@ import type { Settings } from '~/types'
 
 const { settings, loading, load, save } = useSettings()
 const {
-  imports: githubImports,
+  skillImports,
+  agentImports,
   loading: importsLoading,
   fetchImports: fetchGithubImports,
   checkUpdates,
   updateImport,
   removeImport,
 } = useGithubImports()
+
+const githubImports = computed(() => {
+  return [
+    ...(skillImports?.value || []).map(i => ({ ...i, type: 'skills' as const })),
+    ...(agentImports?.value || []).map(i => ({ ...i, type: 'agents' as const }))
+  ]
+})
+
 const toast = useToast()
 
 const rawJson = ref('')
 const saving = ref(false)
 const viewMode = ref<'structured' | 'raw'>('structured')
+const showRemoveConfirm = ref(false)
+const repoToRemove = ref<{ owner: string; repo: string; type: 'skills' | 'agents'; count: number } | null>(null)
 
 onMounted(async () => {
   await load()
@@ -22,30 +33,55 @@ onMounted(async () => {
 })
 
 onMounted(async () => {
-  await fetchGithubImports()
+  await Promise.all([
+    fetchGithubImports('skills'),
+    fetchGithubImports('agents')
+  ])
 })
 
-async function onUpdateImport(owner: string, repo: string) {
+async function onUpdateImport(owner: string, repo: string, type: 'skills' | 'agents') {
   try {
-    await updateImport(owner, repo)
+    await updateImport(owner, repo, type)
     toast.add({ title: 'Import updated', color: 'success' })
   } catch {
     toast.add({ title: 'Update failed', color: 'error' })
   }
 }
 
-async function onRemoveImport(owner: string, repo: string) {
+async function onRemoveImport(owner: string, repo: string, type: 'skills' | 'agents') {
+  const list = type === 'skills' ? skillImports : agentImports
+  const entry = list.value.find(i => i.owner === owner && i.repo === repo)
+  
+  repoToRemove.value = {
+    owner,
+    repo,
+    type,
+    count: entry?.selectedItems?.length || 0
+  }
+  showRemoveConfirm.value = true
+}
+
+async function confirmRemove() {
+  if (!repoToRemove.value) return
+  const { owner, repo, type } = repoToRemove.value
+  
   try {
-    await removeImport(owner, repo)
+    await removeImport(owner, repo, type)
     toast.add({ title: 'Import removed', color: 'success' })
   } catch {
     toast.add({ title: 'Remove failed', color: 'error' })
+  } finally {
+    showRemoveConfirm.value = false
+    repoToRemove.value = null
   }
 }
 
 async function onCheckUpdates() {
   try {
-    await checkUpdates()
+    await Promise.all([
+      checkUpdates('skills'),
+      checkUpdates('agents')
+    ])
     toast.add({ title: 'Update check complete', color: 'success' })
   } catch {
     toast.add({ title: 'Update check failed', color: 'error' })
@@ -371,13 +407,19 @@ const lineCount = computed(() => rawJson.value.split('\n').length)
         <div v-else class="space-y-2">
           <div
             v-for="entry in githubImports"
-            :key="`${entry.owner}/${entry.repo}`"
+            :key="`${entry.type}/${entry.owner}/${entry.repo}`"
             class="flex items-center justify-between py-2 px-3 rounded-lg"
             style="background: var(--input-bg);"
           >
-            <div class="flex-1 min-w-0">
+            <div class="flex-1 min-w-0 flex items-center gap-2">
               <span class="font-mono text-[12px] text-body">{{ entry.owner }}/{{ entry.repo }}</span>
-              <span class="text-[10px] text-meta ml-2">{{ entry.selectedSkills.length }} skills</span>
+              <span 
+                class="text-[9px] font-mono px-1.5 py-px rounded-full uppercase" 
+                style="background: var(--badge-subtle-bg); color: var(--text-tertiary); border: 1px solid var(--border-subtle);"
+              >
+                {{ entry.type }}
+              </span>
+              <span class="text-[10px] text-meta ml-1">{{ entry.selectedItems?.length || 0 }} items</span>
             </div>
             <div class="flex items-center gap-2">
               <span
@@ -392,14 +434,14 @@ const lineCount = computed(() => rawJson.value.split('\n').length)
                 label="Update"
                 size="xs"
                 variant="soft"
-                @click="onUpdateImport(entry.owner, entry.repo)"
+                @click="onUpdateImport(entry.owner, entry.repo, entry.type)"
               />
               <button
-                class="p-1.5 -m-0.5 rounded focus-ring text-meta"
+                class="p-1.5 -m-0.5 rounded focus-ring text-meta hover:text-error transition-colors"
                 aria-label="Remove import"
-                @click="onRemoveImport(entry.owner, entry.repo)"
+                @click="onRemoveImport(entry.owner, entry.repo, entry.type)"
               >
-                <UIcon name="i-lucide-x" class="size-3.5" />
+                <UIcon name="i-lucide-trash-2" class="size-3.5" />
               </button>
             </div>
           </div>
@@ -521,6 +563,46 @@ const lineCount = computed(() => rawJson.value.split('\n').length)
               size="sm"
               :disabled="!newHookEvent || !newHookCommand"
               @click="addHook"
+            />
+          </div>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- Delete Confirmation Modal -->
+    <UModal v-model:open="showRemoveConfirm">
+      <template #content>
+        <div class="p-6 space-y-4 bg-overlay">
+          <div class="flex items-center gap-3">
+            <div class="size-10 rounded-full flex items-center justify-center shrink-0" style="background: rgba(239, 68, 68, 0.1);">
+              <UIcon name="i-lucide-alert-triangle" class="size-6 text-error" />
+            </div>
+            <div>
+              <h3 class="text-[15px] font-semibold text-primary">Remove Repository?</h3>
+              <p class="text-[12px] text-label mt-1">This action cannot be undone.</p>
+            </div>
+          </div>
+
+          <div class="rounded-lg p-3 border" style="background: var(--surface-base); border-color: var(--border-subtle);">
+            <p class="text-[13px] leading-relaxed">
+              Removing <span class="font-mono font-bold">{{ repoToRemove?.owner }}/{{ repoToRemove?.repo }}</span> will delete the local clone and unlink 
+              <strong class="text-error">{{ repoToRemove?.count }} {{ repoToRemove?.type }}</strong> currently installed on your system.
+            </p>
+          </div>
+
+          <div class="flex justify-end gap-3 pt-2">
+            <UButton
+              label="Cancel"
+              variant="ghost"
+              color="neutral"
+              size="sm"
+              @click="showRemoveConfirm = false"
+            />
+            <UButton
+              label="Confirm Delete"
+              color="error"
+              size="sm"
+              @click="confirmRemove"
             />
           </div>
         </div>

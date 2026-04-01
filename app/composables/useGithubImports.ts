@@ -1,4 +1,4 @@
-import type { GithubImport, GithubImportsRegistry, ScanResult } from '~/types'
+import type { GithubImport, GithubImportsRegistry, SkillScanResult, AgentScanResult } from '~/types'
 
 export interface GithubSymlinkSync {
   linked: string[]
@@ -8,27 +8,42 @@ export interface GithubSymlinkSync {
 }
 
 export function useGithubImports() {
-  const imports = useState<GithubImport[]>('githubImports', () => [])
+  const skillImports = useState<GithubImport[]>('githubSkillImports', () => [])
+  const agentImports = useState<GithubImport[]>('githubAgentImports', () => [])
   const loading = useState('githubImportsLoading', () => false)
   const scanning = useState('githubImportsScanning', () => false)
-  const updatesAvailable = useState('githubImportsUpdates', () => 0)
+  const skillUpdatesAvailable = useState('githubSkillImportsUpdates', () => 0)
+  const agentUpdatesAvailable = useState('githubAgentImportsUpdates', () => 0)
 
-  async function fetchImports() {
+  async function fetchImports(type: 'skills' | 'agents') {
     loading.value = true
     try {
-      const data = await $fetch<GithubImportsRegistry>('/api/github/imports')
-      imports.value = data.imports
+      const data = await $fetch<GithubImportsRegistry>(`/api/github/imports?type=${type}`)
+      if (type === 'skills') skillImports.value = data.imports
+      else agentImports.value = data.imports
     } catch (e) {
-      console.error('Failed to fetch GitHub imports:', e)
+      console.error(`Failed to fetch ${type} imports:`, e)
     } finally {
       loading.value = false
     }
   }
 
-  async function scan(url: string): Promise<ScanResult> {
+  async function scanSkills(url: string): Promise<SkillScanResult> {
     scanning.value = true
     try {
-      return await $fetch<ScanResult>('/api/github/scan', {
+      return await $fetch<SkillScanResult>('/api/github/scan-skills', {
+        method: 'POST',
+        body: { url },
+      })
+    } finally {
+      scanning.value = false
+    }
+  }
+
+  async function scanAgents(url: string): Promise<AgentScanResult> {
+    scanning.value = true
+    try {
+      return await $fetch<AgentScanResult>('/api/github/scan-agents', {
         method: 'POST',
         body: { url },
       })
@@ -42,85 +57,110 @@ export function useGithubImports() {
     repo: string
     url: string
     targetPath: string
-    selectedSkills: string[]
+    selectedItems: string[]
+    totalItems: number
+    type: 'skills' | 'agents'
   }): Promise<GithubImport> {
     const entry = await $fetch<GithubImport>('/api/github/import', {
       method: 'POST',
       body: params,
     })
-    imports.value.push(entry)
+    if (params.type === 'skills') skillImports.value.push(entry)
+    else agentImports.value.push(entry)
     return entry
   }
 
-  async function checkUpdates() {
+  async function checkUpdates(type: 'skills' | 'agents') {
     try {
       const data = await $fetch<{ imports: GithubImport[]; updatesAvailable: number }>(
         '/api/github/check-updates',
-        { method: 'POST' },
+        { method: 'POST', body: { type } },
       )
-      imports.value = data.imports
-      updatesAvailable.value = data.updatesAvailable
+      if (type === 'skills') {
+        skillImports.value = data.imports
+        skillUpdatesAvailable.value = data.updatesAvailable
+      } else {
+        agentImports.value = data.imports
+        agentUpdatesAvailable.value = data.updatesAvailable
+      }
     } catch {
       // Silently fail — cached state is fine
     }
   }
 
-  async function updateImport(owner: string, repo: string): Promise<{ changedFiles: string[] }> {
+  async function updateImport(owner: string, repo: string, type: 'skills' | 'agents'): Promise<{ changedFiles: string[] }> {
     const data = await $fetch<{ entry: GithubImport; changedFiles: string[] }>(
       '/api/github/update',
-      { method: 'POST', body: { owner, repo } },
+      { method: 'POST', body: { owner, repo, type } },
     )
-    const idx = imports.value.findIndex(i => i.owner === owner && i.repo === repo)
-    if (idx !== -1) imports.value[idx] = data.entry
-    updatesAvailable.value = imports.value.filter(i => i.currentSha !== i.remoteSha).length
+    const list = type === 'skills' ? skillImports : agentImports
+    const idx = list.value.findIndex(i => i.owner === owner && i.repo === repo)
+    if (idx !== -1) list.value[idx] = data.entry
+    
+    if (type === 'skills') {
+      skillUpdatesAvailable.value = skillImports.value.filter(i => i.currentSha !== i.remoteSha).length
+    } else {
+      agentUpdatesAvailable.value = agentImports.value.filter(i => i.currentSha !== i.remoteSha).length
+    }
+    
     return { changedFiles: data.changedFiles }
   }
 
-  async function getAvailableSkills(owner: string, repo: string) {
+  async function getAvailableItems(owner: string, repo: string, type: 'skills' | 'agents') {
     const data = await $fetch<{
       entry: GithubImport
       availableSkills: { slug: string; name: string; description: string; selected: boolean }[]
+      availableAgents?: { slug: string; name: string; description: string; selected: boolean }[]
     }>('/api/github/edit-selection', {
       method: 'POST',
-      body: { owner, repo },
+      body: { owner, repo, type },
     })
-    return data.availableSkills
+    return { skills: data.availableSkills, agents: data.availableAgents || [] }
   }
 
-  async function updateSelectedSkills(owner: string, repo: string, selectedSkills: string[]) {
-    const data = await $fetch<{ entry: GithubImport; symlinkSync: GithubSymlinkSync }>(
+  async function updateSelectedItems(owner: string, repo: string, type: 'skills' | 'agents', selectedItems: string[]) {
+    const data = await $fetch<{ entry: GithubImport; symlinkSync: any }>(
       '/api/github/edit-selection',
       {
         method: 'POST',
-        body: { owner, repo, selectedSkills },
+        body: { owner, repo, type, selectedItems },
       },
     )
-    const idx = imports.value.findIndex(i => i.owner === owner && i.repo === repo)
-    if (idx !== -1) imports.value[idx] = data.entry
+    const list = type === 'skills' ? skillImports : agentImports
+    const idx = list.value.findIndex(i => i.owner === owner && i.repo === repo)
+    if (idx !== -1) list.value[idx] = data.entry
     return { entry: data.entry, symlinkSync: data.symlinkSync }
   }
 
-  async function removeImport(owner: string, repo: string) {
+  async function removeImport(owner: string, repo: string, type: 'skills' | 'agents') {
     await $fetch('/api/github/remove', {
       method: 'POST',
-      body: { owner, repo },
+      body: { owner, repo, type },
     })
-    imports.value = imports.value.filter(i => !(i.owner === owner && i.repo === repo))
-    updatesAvailable.value = imports.value.filter(i => i.currentSha !== i.remoteSha).length
+    if (type === 'skills') {
+      skillImports.value = skillImports.value.filter(i => !(i.owner === owner && i.repo === repo))
+      skillUpdatesAvailable.value = skillImports.value.filter(i => i.currentSha !== i.remoteSha).length
+    } else {
+      agentImports.value = agentImports.value.filter(i => !(i.owner === owner && i.repo === repo))
+      agentUpdatesAvailable.value = agentImports.value.filter(i => i.currentSha !== i.remoteSha).length
+    }
   }
 
   return {
-    imports,
+    skillImports,
+    agentImports,
     loading,
     scanning,
-    updatesAvailable,
+    skillUpdatesAvailable,
+    agentUpdatesAvailable,
     fetchImports,
-    scan,
+    scanSkills,
+    scanAgents,
     importRepo,
     checkUpdates,
     updateImport,
     removeImport,
-    getAvailableSkills,
-    updateSelectedSkills,
+    getAvailableItems,
+    updateSelectedItems,
   }
 }

@@ -1,67 +1,134 @@
 <script setup lang="ts">
-import type { ScanResult } from '~/types'
+import type { SkillScanResult, AgentScanResult } from '~/types'
+
+const props = defineProps<{
+  type: 'skills' | 'agents'
+}>()
 
 const emit = defineEmits<{
   imported: []
 }>()
 
-const { scan, importRepo, scanning } = useGithubImports()
+const { scanSkills, scanAgents, importRepo, scanning } = useGithubImports()
 const toast = useToast()
 
 const step = ref<'url' | 'preview' | 'importing' | 'done'>('url')
 const url = ref('')
-const scanResult = ref<ScanResult | null>(null)
-const selected = ref<Set<string>>(new Set())
+const scanResult = ref<SkillScanResult | AgentScanResult | null>(null)
+const selectedItems = ref<Set<string>>(new Set())
 const importing = ref(false)
 const error = ref('')
+
+const typeLabel = computed(() => props.type === 'skills' ? 'Skills' : 'Agents')
 
 async function doScan() {
   error.value = ''
   try {
-    scanResult.value = await scan(url.value)
-    selected.value = new Set(scanResult.value.skills.map(s => s.slug))
+    if (props.type === 'skills') {
+      const result = await scanSkills(url.value)
+      scanResult.value = result
+      selectedItems.value = new Set(result.skills.map(s => s.slug))
+    } else {
+      const result = await scanAgents(url.value)
+      scanResult.value = result
+      selectedItems.value = new Set(result.agents.map(a => a.slug))
+    }
+    
     step.value = 'preview'
   } catch (e: any) {
     error.value = e.data?.data?.message || e.data?.message || e.message || 'Failed to scan repository'
   }
 }
 
-function toggleSkill(slug: string) {
-  if (selected.value.has(slug)) {
-    selected.value.delete(slug)
+function toggleItem(slug: string) {
+  if (selectedItems.value.has(slug)) {
+    selectedItems.value.delete(slug)
   } else {
-    selected.value.add(slug)
+    selectedItems.value.add(slug)
   }
-  selected.value = new Set(selected.value)
+  selectedItems.value = new Set(selectedItems.value)
 }
 
 function toggleAll() {
   if (!scanResult.value) return
-  if (selected.value.size === scanResult.value.skills.length) {
-    selected.value = new Set()
+  if (props.type === 'skills') {
+    const sr = scanResult.value as SkillScanResult
+    if (selectedItems.value.size === sr.skills.length) {
+      selectedItems.value = new Set()
+    } else {
+      selectedItems.value = new Set(sr.skills.map(s => s.slug))
+    }
   } else {
-    selected.value = new Set(scanResult.value.skills.map(s => s.slug))
+    const sr = scanResult.value as AgentScanResult
+    if (selectedItems.value.size === sr.agents.length) {
+      selectedItems.value = new Set()
+    } else {
+      selectedItems.value = new Set(sr.agents.map(a => a.slug))
+    }
   }
 }
 
 async function doImport() {
-  if (!scanResult.value || selected.value.size === 0) return
+  const result = scanResult.value
+  const currentUrl = url.value
+  const currentType = props.type
+  
+  if (!result || !currentUrl) return
+  
+  if (selectedItems.value.size === 0) return
+
   importing.value = true
   step.value = 'importing'
+  
   try {
-    await importRepo({
-      owner: scanResult.value.owner,
-      repo: scanResult.value.repo,
-      url: url.value,
-      targetPath: scanResult.value.targetPath,
-      selectedSkills: [...selected.value],
-    })
+    let totalItems = 0
+    const selectedItemsList = [...selectedItems.value]
+    
+    if (currentType === 'skills') {
+      totalItems = (result as SkillScanResult).totalSkills || 0
+    } else {
+      totalItems = (result as AgentScanResult).totalAgents || 0
+    }
+
+    const payload = {
+      owner: result.owner,
+      repo: result.repo,
+      url: currentUrl,
+      targetPath: result.targetPath || '',
+      selectedItems: selectedItemsList,
+      totalItems,
+      type: currentType,
+    }
+
+    // Client-side validation
+    if (!payload.owner || !payload.repo || !payload.url || !payload.type) {
+      const missing = []
+      if (!payload.owner) missing.push('owner')
+      if (!payload.repo) missing.push('repo')
+      if (!payload.url) missing.push('url')
+      if (!payload.type) missing.push('type')
+      
+      throw new Error(`Validation failed: Missing ${missing.join(', ')}`)
+    }
+
+    await importRepo(payload)
+    
     step.value = 'done'
-    toast.add({ title: `Imported ${selected.value.size} skills from ${scanResult.value.owner}/${scanResult.value.repo}`, color: 'success' })
-    emit('imported')
+    
+    const count = selectedItems.value.size
+    toast.add({ 
+      title: `Import complete`, 
+      description: `Imported ${count} ${currentType} from ${result.owner}/${result.repo}`,
+      color: 'success' 
+    })
   } catch (e: any) {
     error.value = e.data?.data?.message || e.data?.message || e.message || 'Import failed'
     step.value = 'preview'
+    toast.add({
+      title: 'Import failed',
+      description: error.value,
+      color: 'error'
+    })
   } finally {
     importing.value = false
   }
@@ -71,19 +138,19 @@ function reset() {
   step.value = 'url'
   url.value = ''
   scanResult.value = null
-  selected.value = new Set()
+  selectedItems.value = new Set()
   error.value = ''
 }
 </script>
 
 <template>
-  <div class="p-6 space-y-4 bg-overlay min-w-[480px]">
-    <h3 class="text-page-title">Import from GitHub</h3>
+  <div class="p-6 space-y-4 bg-overlay min-w-[520px]">
+    <h3 class="text-page-title">Import {{ typeLabel }} from GitHub</h3>
 
     <!-- Step 1: URL input -->
     <template v-if="step === 'url'">
       <p class="text-[12px] text-label leading-relaxed">
-        Paste a GitHub repository URL to scan for importable skills.
+        Paste a GitHub repository URL to scan for importable {{ typeLabel.toLowerCase() }}.
       </p>
 
       <div class="field-group">
@@ -119,48 +186,80 @@ function reset() {
 
     <!-- Step 2: Preview & select -->
     <template v-if="step === 'preview' && scanResult">
-      <div class="flex items-center justify-between">
+      <div class="flex items-center justify-between mb-2">
         <p class="text-[12px] text-label">
-          Found <strong>{{ scanResult.skills.length }}</strong> skills in
+          Found <strong>{{ type === 'skills' ? (scanResult as SkillScanResult).totalSkills : (scanResult as AgentScanResult).totalAgents }}</strong> {{ typeLabel.toLowerCase() }} in
           <span class="font-mono">{{ scanResult.owner }}/{{ scanResult.repo }}</span>
         </p>
         <button class="text-[12px] text-meta hover:text-label" @click="toggleAll">
-          {{ selected.size === scanResult.skills.length ? 'Deselect all' : 'Select all' }}
+          {{ (type === 'skills' ? selectedItems.size === (scanResult as SkillScanResult).skills.length : selectedItems.size === (scanResult as AgentScanResult).agents.length) ? 'Deselect all' : 'Select all' }}
         </button>
       </div>
 
       <div class="max-h-80 overflow-y-auto space-y-1 rounded-lg p-1" style="background: var(--surface-base);">
-        <label
-          v-for="skill in scanResult.skills"
-          :key="skill.slug"
-          class="flex items-start gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover-row"
-        >
-          <input
-            type="checkbox"
-            :checked="selected.has(skill.slug)"
-            class="mt-0.5 shrink-0"
-            @change="toggleSkill(skill.slug)"
-          />
-          <div class="flex-1 min-w-0">
-            <div class="flex items-center gap-2">
-              <span class="text-[13px] font-medium truncate">{{ skill.name }}</span>
-              <span
-                v-if="skill.conflict"
-                class="text-[9px] font-medium px-1.5 py-px rounded-full shrink-0"
-                style="background: rgba(234, 179, 8, 0.1); color: var(--warning, #eab308);"
-              >
-                exists locally
-              </span>
-              <span
-                v-if="skill.category"
-                class="text-[10px] font-mono px-1.5 py-px rounded-full shrink-0 badge badge-subtle"
-              >
-                {{ skill.category }}
-              </span>
+        <!-- Skills List -->
+        <template v-if="type === 'skills'">
+          <label
+            v-for="skill in (scanResult as SkillScanResult).skills"
+            :key="skill.slug"
+            class="flex items-start gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover-row"
+          >
+            <input
+              type="checkbox"
+              :checked="selectedItems.has(skill.slug)"
+              class="mt-0.5 shrink-0"
+              @change="toggleItem(skill.slug)"
+            />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-[13px] font-medium truncate">{{ skill.name }}</span>
+                <span
+                  v-if="skill.conflict"
+                  class="text-[9px] font-medium px-1.5 py-px rounded-full shrink-0"
+                  style="background: rgba(234, 179, 8, 0.1); color: var(--warning, #eab308);"
+                >
+                  exists locally
+                </span>
+                <span
+                  v-if="skill.category"
+                  class="text-[10px] font-mono px-1.5 py-px rounded-full shrink-0 badge badge-subtle"
+                >
+                  {{ skill.category }}
+                </span>
+              </div>
+              <p class="text-[11px] text-label mt-0.5 line-clamp-2">{{ skill.description }}</p>
             </div>
-            <p class="text-[11px] text-label mt-0.5 line-clamp-2">{{ skill.description }}</p>
-          </div>
-        </label>
+          </label>
+        </template>
+
+        <!-- Agents List -->
+        <template v-else>
+          <label
+            v-for="agent in (scanResult as AgentScanResult).agents"
+            :key="agent.slug"
+            class="flex items-start gap-3 px-3 py-2.5 rounded-lg cursor-pointer hover-row"
+          >
+            <input
+              type="checkbox"
+              :checked="selectedItems.has(agent.slug)"
+              class="mt-0.5 shrink-0"
+              @change="toggleItem(agent.slug)"
+            />
+            <div class="flex-1 min-w-0">
+              <div class="flex items-center gap-2">
+                <span class="text-[13px] font-medium truncate">{{ agent.name }}</span>
+                <span
+                  v-if="agent.conflict"
+                  class="text-[9px] font-medium px-1.5 py-px rounded-full shrink-0"
+                  style="background: rgba(234, 179, 8, 0.1); color: var(--warning, #eab308);"
+                >
+                  exists locally
+                </span>
+              </div>
+              <p class="text-[11px] text-label mt-0.5 line-clamp-2">{{ agent.description }}</p>
+            </div>
+          </label>
+        </template>
       </div>
 
       <div
@@ -171,13 +270,13 @@ function reset() {
         {{ error }}
       </div>
 
-      <div class="flex justify-between">
+      <div class="flex justify-between mt-4">
         <UButton label="Back" variant="ghost" color="neutral" size="sm" @click="reset" />
         <UButton
-          :label="`Import ${selected.size} skill${selected.size === 1 ? '' : 's'}`"
+          :label="`Import ${selectedItems.size} ${typeLabel.toLowerCase()}`"
           icon="i-lucide-download"
           size="sm"
-          :disabled="selected.size === 0"
+          :disabled="selectedItems.size === 0"
           @click="doImport"
         />
       </div>
@@ -187,7 +286,7 @@ function reset() {
     <template v-if="step === 'importing'">
       <div class="flex flex-col items-center py-8 space-y-3">
         <UIcon name="i-lucide-loader-2" class="size-6 animate-spin text-meta" />
-        <p class="text-[13px] text-label">Cloning repository...</p>
+        <p class="text-[13px] text-label">Cloning repository and linking {{ typeLabel.toLowerCase() }}...</p>
       </div>
     </template>
 
@@ -202,9 +301,10 @@ function reset() {
         </div>
         <p class="text-[13px] font-medium">Import complete</p>
         <p class="text-[12px] text-label">
-          {{ selected.size }} skill{{ selected.size === 1 ? '' : 's' }} imported from
+          {{ selectedItems.size }} {{ typeLabel.toLowerCase() }} imported from
           <span class="font-mono">{{ scanResult?.owner }}/{{ scanResult?.repo }}</span>
         </p>
+        <UButton label="Close" size="sm" class="mt-4" @click="emit('imported')" />
       </div>
     </template>
   </div>

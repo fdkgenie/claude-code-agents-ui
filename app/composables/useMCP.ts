@@ -83,12 +83,8 @@ export function useMCP() {
         oldName: server.name,
         disabled: newDisabled
       })
-      toast.add({ 
-        title: `Server ${server.name} ${newDisabled ? 'disabled' : 'enabled'}`, 
-        color: 'success' 
-      })
     } catch (err: any) {
-      toast.add({ title: 'Failed to toggle server', description: err.message, color: 'error' })
+      // Error is already handled/toasted by addServer
     }
   }
 

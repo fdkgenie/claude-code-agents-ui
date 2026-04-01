@@ -1,5 +1,11 @@
-export default defineEventHandler(async () => {
-  const registry = await readImportsRegistry()
+import { readImportsRegistry, writeImportsRegistry } from '../../utils/github'
+import { gitLsRemote } from '../../utils/gitOps'
+
+export default defineEventHandler(async (event) => {
+  const { type } = await readBody<{ type: 'skills' | 'agents' }>(event)
+  if (!type) throw createError({ statusCode: 400, message: 'type is required' })
+
+  const registry = await readImportsRegistry(type)
   const now = new Date().toISOString()
 
   await Promise.allSettled(
@@ -10,7 +16,7 @@ export default defineEventHandler(async () => {
     })
   )
 
-  await writeImportsRegistry(registry)
+  await writeImportsRegistry(type, registry)
 
   return {
     imports: registry.imports,

@@ -48,7 +48,13 @@ function animateCounter(target: number, key: keyof typeof animatedCounts) {
 
 onMounted(async () => {
   dirInput.value = claudeDir.value || "";
-  await Promise.all([loadSettings(), fetchPlugins(), fetchSkills(), fetchImports()]);
+  await Promise.all([
+    loadSettings(), 
+    fetchPlugins(), 
+    fetchSkills(), 
+    fetchImports('skills'),
+    fetchImports('agents')
+  ]);
 
   // Animate counters after data loads
   nextTick(() => {
