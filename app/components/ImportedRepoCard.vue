@@ -39,7 +39,12 @@ const groupedItems = computed(() => {
 const collapsedCategories = ref<Set<string>>(new Set())
 
 function initCollapsed() {
-  collapsedCategories.value = new Set(Object.keys(groupedItems.value))
+  const collapsed = new Set<string>()
+  for (const [cat, items] of Object.entries(groupedItems.value)) {
+    const hasSelected = items.some(i => selectedItems.value.has(i.slug))
+    if (!hasSelected) collapsed.add(cat)
+  }
+  collapsedCategories.value = collapsed
 }
 
 function toggleCategory(cat: string) {
