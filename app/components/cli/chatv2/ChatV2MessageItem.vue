@@ -199,7 +199,7 @@ function getTodoStatusBadge(status: string): { bg: string; color: string; label:
     <template v-else-if="message.kind === 'text' && message.content">
       <div class="group relative">
         <div
-          class="prose prose-sm text-[13px] leading-relaxed"
+          class="prose prose-sm max-w-none text-[13px] leading-relaxed break-words"
           style="color: var(--text-primary);"
           v-html="renderedContent"
         />
@@ -883,6 +883,7 @@ function getTodoStatusBadge(status: string): { bg: string; color: string; label:
   margin: 1rem 0;
   border-radius: 0.5rem;
   overflow: hidden;
+  max-width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.07);
 }
 
