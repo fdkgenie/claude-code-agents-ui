@@ -67,6 +67,10 @@ async function save() {
     command.value = updated
     clearDraft()
     toast.add({ title: 'Saved', color: 'success' })
+
+    if (updated.slug !== slug) {
+      router.push(`/commands/${updated.slug}`)
+    }
   } catch (e: any) {
     toast.add({ title: 'Failed to save', description: e.message, color: 'error' })
   } finally {

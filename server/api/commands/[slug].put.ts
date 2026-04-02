@@ -1,18 +1,9 @@
-import { writeFile } from 'node:fs/promises'
+import { writeFile, rename } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { resolveClaudePath } from '../../utils/claudeDir'
 import { serializeFrontmatter } from '../../utils/frontmatter'
+import { slugToPath, pathToSlug } from '../../utils/slugUtils'
 import type { CommandPayload } from '~/types'
-
-function slugToPath(slug: string): { directory: string; filename: string } {
-  const parts = slug.split('--')
-  if (parts.length === 1) {
-    return { directory: '', filename: `${parts[0]}.md` }
-  }
-  const filename = `${parts.pop()}.md`
-  const directory = parts.join('/')
-  return { directory, filename }
-}
 
 export default defineEventHandler(async (event) => {
   const slug = getRouterParam(event, 'slug')!
@@ -27,14 +18,37 @@ export default defineEventHandler(async (event) => {
 
   const payload = await readBody<CommandPayload>(event)
   const content = serializeFrontmatter(payload.frontmatter, payload.body)
-  await writeFile(filePath, content, 'utf-8')
+
+  let finalFilePath = filePath
+  let finalSlug = slug
+
+  // Rename file if the name in frontmatter changed
+  const newName = payload.frontmatter.name
+  if (newName && newName !== slug) {
+    const newFilename = `${newName}.md`
+    const newFilePath = directory
+      ? resolveClaudePath('commands', directory, newFilename)
+      : resolveClaudePath('commands', newFilename)
+
+    if (newFilePath !== filePath) {
+      // Ensure we don't overwrite an existing file
+      if (existsSync(newFilePath)) {
+        throw createError({ statusCode: 409, message: `A command with the name "${newName}" already exists.` })
+      }
+      await rename(filePath, newFilePath)
+      finalFilePath = newFilePath
+      finalSlug = pathToSlug(directory, newFilename)
+    }
+  }
+
+  await writeFile(finalFilePath, content, 'utf-8')
 
   return {
-    slug,
-    filename,
+    slug: finalSlug,
+    filename: finalFilePath.split('/').pop(),
     directory,
     frontmatter: payload.frontmatter,
     body: payload.body,
-    filePath,
+    filePath: finalFilePath,
   }
 })

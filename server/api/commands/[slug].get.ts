@@ -2,17 +2,8 @@ import { readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { resolveClaudePath } from '../../utils/claudeDir'
 import { parseFrontmatter } from '../../utils/frontmatter'
+import { slugToPath } from '../../utils/slugUtils'
 import type { CommandFrontmatter } from '~/types'
-
-function slugToPath(slug: string): { directory: string; filename: string } {
-  const parts = slug.split('--')
-  if (parts.length === 1) {
-    return { directory: '', filename: `${parts[0]}.md` }
-  }
-  const filename = `${parts.pop()}.md`
-  const directory = parts.join('/')
-  return { directory, filename }
-}
 
 export default defineEventHandler(async (event) => {
   const slug = getRouterParam(event, 'slug')!
