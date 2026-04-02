@@ -165,16 +165,17 @@ export function useChatSessions() {
   }
 
   /**
-   * Add a message to the current session (realtime)
+   * Add a message to the session (realtime)
    */
   function addMessage(message: NormalizedMessage) {
-    if (!currentSessionId.value) return
+    const targetSessionId = message.sessionId || currentSessionId.value
+    if (!targetSessionId) return
 
     // Add to session store (realtime messages)
-    sessionStore.appendRealtime(currentSessionId.value, message)
+    sessionStore.appendRealtime(targetSessionId, message)
 
-    // Update current session metadata
-    if (currentSession.value) {
+    // Update current session metadata only if it's the current session
+    if (currentSession.value && targetSessionId === currentSessionId.value) {
       currentSession.value.lastActivity = message.timestamp
       currentSession.value.messageCount = (currentSession.value.messageCount || 0) + 1
     }
@@ -185,19 +186,19 @@ export function useChatSessions() {
    * Note: For streaming text, use sessionStore.updateStreaming instead
    */
   function updateMessage(messageId: string, updates: Partial<NormalizedMessage>) {
-    if (!currentSessionId.value) return
+    const targetSessionId = updates.sessionId || currentSessionId.value
+    if (!targetSessionId) return
 
-    // Get current messages and find the one to update
-    const currentMessages = messages.value
+    // Get current messages from store for this session
+    const currentMessages = sessionStore.getMessages(targetSessionId)
     const idx = currentMessages.findIndex((m) => m.id === messageId)
 
     if (idx !== -1) {
       // Create updated message
       const updated: NormalizedMessage = { ...currentMessages[idx], ...updates } as NormalizedMessage
 
-      // For now, just add as a new realtime message (will deduplicate)
-      // In production, we'd want a proper update method in sessionStore
-      sessionStore.appendRealtime(currentSessionId.value, updated)
+      // Update in store
+      sessionStore.appendRealtime(targetSessionId, updated)
     }
   }
 

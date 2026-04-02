@@ -370,10 +370,8 @@ export function useChatV2Handler() {
 
     // Set up session state for streaming response
     if (sent) {
-      // Update current session ID if using new temp session
-      if (!currentSessionId.value) {
-        currentSessionId.value = targetSessionId
-      }
+      // Always update current session ID to the actual target ID
+      currentSessionId.value = targetSessionId
       
       // Set active session so store updates trigger reactivity
       sessionStore.setActiveSession(targetSessionId)
@@ -485,5 +483,11 @@ export function useChatV2Handler() {
 
     // Session store access
     sessionStore,
+    setCurrentSessionId: (id: string | null) => {
+      currentSessionId.value = id
+      if (id) {
+        sessionStore.setActiveSession(id)
+      }
+    },
   }
 }

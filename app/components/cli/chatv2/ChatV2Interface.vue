@@ -33,6 +33,7 @@ const {
   abort,
   respondToPermission,
   sessionStore,
+  setCurrentSessionId,
   contextMonitor,
 } = useChatV2Handler()
 
@@ -264,25 +265,32 @@ const thinkingEnabled = ref(false)
 
 // Get display messages - either from live session or Claude Code history
 const displayMessages = computed<DisplayChatMessage[]>(() => {
-  // If continuing a history session, combine history + new live messages
-  if (isContinuingHistory.value && currentSessionId.value) {
+  // Determine which session ID to use for live messages
+  const liveSessionId = currentSessionId.value || urlSessionId.value
+
+  // If viewing Claude Code history
+  if (viewMode.value === 'history') {
     const historyMessages = convertClaudeCodeMessages(claudeCodeMessages.value)
-    const liveMessages = sessionStore.getMessages(currentSessionId.value)
-    const newMessages = convertToDisplayMessages(liveMessages, streamingText.value)
-    return [...historyMessages, ...newMessages]
+    
+    // Always check for live messages if we have a session ID
+    if (liveSessionId) {
+      const liveMessages = sessionStore.getMessages(liveSessionId)
+      // If we have live messages or streaming text, combine them
+      if (liveMessages.length > 0 || streamingText.value) {
+        const newMessages = convertToDisplayMessages(liveMessages, streamingText.value)
+        return [...historyMessages, ...newMessages]
+      }
+    }
+    
+    return historyMessages
   }
 
-  // If viewing Claude Code history (not continuing)
-  if (viewMode.value === 'history' && claudeCodeMessages.value.length > 0) {
-    return convertClaudeCodeMessages(claudeCodeMessages.value)
-  }
-
-  // Live session - only show messages from active session, no fallback to 'pending'
-  if (!currentSessionId.value) {
+  // Live session only (new chat)
+  if (!liveSessionId) {
     return []
   }
 
-  const messages = sessionStore.getMessages(currentSessionId.value)
+  const messages = sessionStore.getMessages(liveSessionId)
   return convertToDisplayMessages(messages, streamingText.value)
 })
 
@@ -306,6 +314,7 @@ watch(error, (newError) => {
 function handleClaudeCodeProjectSelected(payload: { projectName: string; projectDisplayName: string }) {
   urlProjectName.value = payload.projectName
   urlSessionId.value = null
+  setCurrentSessionId(null) // Clear active session
   currentSessionSummary.value = ''
   currentProjectDisplayName.value = payload.projectDisplayName
 
@@ -360,6 +369,7 @@ async function handleClaudeCodeSessionSelected(payload: { projectName: string; s
   isLiveChat.value = false
   urlProjectName.value = payload.projectName
   urlSessionId.value = payload.sessionId
+  setCurrentSessionId(payload.sessionId) // Sync active session
   currentSessionSummary.value = payload.sessionSummary
   currentProjectDisplayName.value = payload.projectDisplayName
   isContinuingHistory.value = false  // Reset when selecting a new history session
@@ -396,6 +406,7 @@ function handleSelectionCleared() {
   isLiveChat.value = false
   urlProjectName.value = null
   urlSessionId.value = null
+  setCurrentSessionId(null) // Clear active session
   currentSessionSummary.value = ''
   currentProjectDisplayName.value = ''
   isContinuingHistory.value = false
@@ -413,6 +424,7 @@ function handleNewChat(payload?: { workingDir?: string; projectDisplayName?: str
   isLiveChat.value = true
   urlProjectName.value = null
   urlSessionId.value = null
+  setCurrentSessionId(null) // Clear active session
   currentSessionSummary.value = ''
   currentProjectDisplayName.value = payload?.projectDisplayName || ''
   isContinuingHistory.value = false
