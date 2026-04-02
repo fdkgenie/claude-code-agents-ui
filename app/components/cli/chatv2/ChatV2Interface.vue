@@ -326,23 +326,30 @@ function handleClaudeCodeProjectSelected(payload: { projectName: string; project
 // Utility: delay for minimum loading time
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
-// Scroll to bottom helper
-function scrollToBottom(behavior: ScrollBehavior = 'auto') {
-  nextTick(() => {
-    if (!messagesContainerRef.value) return
-    messagesContainerRef.value.scrollTop = messagesContainerRef.value.scrollHeight
-
-    // Use a small timeout to handle layout shifts from async rendering (images, code blocks)
-    setTimeout(() => {
-      if (messagesContainerRef.value) {
-        messagesContainerRef.value.scrollTo({
-          top: messagesContainerRef.value.scrollHeight,
-          behavior
-        })
+// Scroll to bottom helper — returns a Promise that resolves once scroll + layout settle
+function scrollToBottom(behavior: ScrollBehavior = 'auto'): Promise<void> {
+  return new Promise(resolve => {
+    nextTick(() => {
+      if (!messagesContainerRef.value) {
+        isInitialScroll.value = false
+        resolve()
+        return
       }
-      // Finished scrolling - make container visible if it was hidden
-      isInitialScroll.value = false
-    }, 150)
+      messagesContainerRef.value.scrollTop = messagesContainerRef.value.scrollHeight
+
+      // Use a small timeout to handle layout shifts from async rendering (images, code blocks)
+      setTimeout(() => {
+        if (messagesContainerRef.value) {
+          messagesContainerRef.value.scrollTo({
+            top: messagesContainerRef.value.scrollHeight,
+            behavior
+          })
+        }
+        // Finished scrolling - make container visible if it was hidden
+        isInitialScroll.value = false
+        resolve()
+      }, 150)
+    })
   })
 }
 
@@ -378,11 +385,10 @@ async function handleClaudeCodeSessionSelected(payload: { projectName: string; s
     contextMonitor.resetMetrics()
   }
 
-  // End loading state
+  // Scroll to bottom first — waits for layout to settle and makes messages visible
+  // Only then hide the spinner so there's no blank flash between loader and content
+  await scrollToBottom()
   isLoadingHistoryWithDelay.value = false
-
-  // Scroll to bottom (latest messages) after loading
-  scrollToBottom()
 }
 
 // Handle selection cleared (back to projects list)
