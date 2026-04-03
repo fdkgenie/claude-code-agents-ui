@@ -1,10 +1,11 @@
 <script setup lang="ts">
 interface MenuItem {
-  type: 'command' | 'skill'
+  type: 'command' | 'skill' | 'builtin'
   name: string
   description?: string
   slug: string
   directory?: string
+  argumentHint?: string
 }
 
 const props = defineProps<{
@@ -47,18 +48,27 @@ watch(() => props.selectedIndex, (newIdx) => {
         @click="emit('select', item)"
       >
         <div class="flex items-center gap-2 w-full">
-          <UIcon 
-            :name="item.type === 'command' ? 'i-lucide-terminal' : 'i-lucide-sparkles'" 
-            class="size-3.5 shrink-0" 
-            :style="{ color: idx === selectedIndex ? 'var(--accent)' : 'var(--text-tertiary)' }" 
+          <UIcon
+            :name="item.type === 'builtin' ? 'i-lucide-zap' : item.type === 'command' ? 'i-lucide-terminal' : 'i-lucide-sparkles'"
+            class="size-3.5 shrink-0"
+            :style="{ color: idx === selectedIndex ? 'var(--accent)' : 'var(--text-tertiary)' }"
           />
           <span class="font-mono text-[13px] font-semibold truncate" :style="{ color: idx === selectedIndex ? 'var(--text-primary)' : 'var(--text-secondary)' }">
             /{{ item.name }}
           </span>
-          <span v-if="item.type === 'skill'" class="text-[8px] font-bold uppercase tracking-wider px-1.5 py-px rounded bg-accent/10 text-accent ml-2">
+          <span v-if="item.argumentHint" class="text-[11px] font-mono truncate" style="color: var(--text-tertiary);">
+            {{ item.argumentHint }}
+          </span>
+          <span v-if="item.type === 'builtin'" class="text-[8px] font-bold uppercase tracking-wider px-1.5 py-px rounded ml-auto" style="background: rgba(139, 92, 246, 0.1); color: #8b5cf6;">
+            Built-in
+          </span>
+          <span v-else-if="item.type === 'skill'" class="text-[8px] font-bold uppercase tracking-wider px-1.5 py-px rounded bg-accent/10 text-accent ml-auto">
             Skill
           </span>
-          <span v-if="item.directory" class="text-[9px] font-mono px-1.5 py-px rounded-full badge-subtle opacity-60 ml-auto">
+          <span v-else-if="item.type === 'command'" class="text-[8px] font-bold uppercase tracking-wider px-1.5 py-px rounded ml-auto" style="background: rgba(6, 182, 212, 0.1); color: #06b6d4;">
+            Command
+          </span>
+          <span v-if="item.directory" class="text-[9px] font-mono px-1.5 py-px rounded-full badge-subtle opacity-60">
             {{ item.directory }}
           </span>
         </div>

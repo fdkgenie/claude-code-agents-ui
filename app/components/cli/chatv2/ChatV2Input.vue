@@ -21,6 +21,57 @@ const { skills: allSkills, fetchAll: fetchSkills } = useSkills()
 const textareaRef = ref<HTMLTextAreaElement | null>(null)
 const isFocused = ref(false)
 
+// Built-in Claude Code slash commands
+const builtinCommands = [
+  { name: 'help', description: 'Show help and available commands' },
+  { name: 'clear', description: 'Clear conversation history and free up context' },
+  { name: 'compact', description: 'Compact conversation with optional focus instructions', argumentHint: '[instructions]' },
+  { name: 'config', description: 'Open settings interface' },
+  { name: 'cost', description: 'Show token usage statistics' },
+  { name: 'model', description: 'Select or change the AI model', argumentHint: '[model]' },
+  { name: 'memory', description: 'Edit CLAUDE.md memory files' },
+  { name: 'permissions', description: 'Manage tool permission rules' },
+  { name: 'resume', description: 'Resume a previous conversation', argumentHint: '[session]' },
+  { name: 'exit', description: 'Exit the CLI' },
+  { name: 'init', description: 'Initialize project with CLAUDE.md guide' },
+  { name: 'plan', description: 'Enter plan mode', argumentHint: '[description]' },
+  { name: 'mcp', description: 'Manage MCP server connections' },
+  { name: 'diff', description: 'Open an interactive diff viewer' },
+  { name: 'rewind', description: 'Rewind conversation to a previous point' },
+  { name: 'doctor', description: 'Diagnose and verify installation' },
+  { name: 'vim', description: 'Toggle Vim editing mode' },
+  { name: 'theme', description: 'Change the color theme' },
+  { name: 'login', description: 'Sign in to Anthropic account' },
+  { name: 'logout', description: 'Sign out from account' },
+  { name: 'status', description: 'Show current session status' },
+  { name: 'debug', description: 'Enable debug logging for the current session', argumentHint: '[description]' },
+  { name: 'copy', description: 'Copy the last assistant response to clipboard', argumentHint: '[N]' },
+  { name: 'export', description: 'Export the current conversation as plain text', argumentHint: '[filename]' },
+  { name: 'context', description: 'Visualize current context usage' },
+  { name: 'effort', description: 'Set the model effort level', argumentHint: '[level]' },
+  { name: 'fast', description: 'Toggle fast mode', argumentHint: '[on|off]' },
+  { name: 'hooks', description: 'View hook configurations' },
+  { name: 'tasks', description: 'List and manage background tasks' },
+  { name: 'add-dir', description: 'Add a working directory for file access', argumentHint: '<path>' },
+  { name: 'rename', description: 'Rename the current session', argumentHint: '[name]' },
+  { name: 'sandbox', description: 'Toggle sandbox mode' },
+  { name: 'usage', description: 'Show plan usage limits' },
+  { name: 'feedback', description: 'Submit feedback about Claude Code', argumentHint: '[report]' },
+  { name: 'release-notes', description: 'View the changelog' },
+  { name: 'ide', description: 'Manage IDE integrations' },
+  { name: 'skills', description: 'List available skills' },
+  { name: 'pr-comments', description: 'Fetch and display GitHub PR comments', argumentHint: '[PR]' },
+  { name: 'voice', description: 'Toggle push-to-talk voice dictation' },
+  { name: 'terminal-setup', description: 'Configure terminal keybindings' },
+  { name: 'upgrade', description: 'Open upgrade page' },
+  { name: 'stats', description: 'Visualize daily usage and session history' },
+  { name: 'branch', description: 'Create a branch of the current conversation', argumentHint: '[name]' },
+  { name: 'color', description: 'Set the prompt bar color', argumentHint: '[color|default]' },
+  { name: 'keybindings', description: 'Open keybindings configuration' },
+  { name: 'statusline', description: 'Configure status line display' },
+  { name: 'privacy-settings', description: 'View and update privacy settings' },
+]
+
 // Command/Skill Menu State
 const isMenuOpen = ref(false)
 const selectedItemIdx = ref(0)
@@ -29,14 +80,15 @@ const menuSearchQuery = ref('')
 const menuItems = computed(() => {
   const items = [
     ...allCommands.value.map(c => ({ type: 'command' as const, name: c.frontmatter.name, description: c.frontmatter.description, slug: c.slug, directory: c.directory })),
-    ...allSkills.value.map(s => ({ type: 'skill' as const, name: s.frontmatter.name, description: s.frontmatter.description, slug: s.slug }))
+    ...allSkills.value.map(s => ({ type: 'skill' as const, name: s.frontmatter.name, description: s.frontmatter.description, slug: s.slug })),
+    ...builtinCommands.map(b => ({ type: 'builtin' as const, name: b.name, description: b.description, slug: b.name, argumentHint: b.argumentHint })),
   ]
-  
+
   if (!menuSearchQuery.value) return items
-  
+
   const q = menuSearchQuery.value.toLowerCase()
-  return items.filter(i => 
-    i.name.toLowerCase().includes(q) || 
+  return items.filter(i =>
+    i.name.toLowerCase().includes(q) ||
     i.description?.toLowerCase().includes(q)
   )
 })
@@ -88,7 +140,7 @@ function autoResize() {
   textareaRef.value.style.height = `${newHeight}px`
 }
 
-function selectItem(item: { type: 'command' | 'skill'; name: string }) {
+function selectItem(item: { type: 'command' | 'skill' | 'builtin'; name: string }) {
   localValue.value = `/${item.name} `
   isMenuOpen.value = false
   textareaRef.value?.focus()
