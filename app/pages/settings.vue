@@ -2,6 +2,71 @@
 import type { Settings } from '~/types'
 
 const { settings, loading, load, save } = useSettings()
+
+// Custom Provider
+const {
+  load: loadProviders,
+  saveCustomEntry,
+  removeCustomProvider,
+  customEntry,
+  hasCustomProvider,
+  loading: providerLoading,
+} = useProviderConfig()
+
+onMounted(() => {
+  loadProviders()
+})
+
+const providerForm = reactive({
+  displayName: '',
+  baseUrl: '',
+  authToken: '',
+  modelMappings: { opus: '', sonnet: '', haiku: '' },
+})
+const showAuthToken = ref(false)
+const providerSaveError = ref('')
+
+watch(customEntry, (entry) => {
+  if (entry) {
+    providerForm.displayName = entry.displayName
+    providerForm.baseUrl = entry.baseUrl ?? ''
+    providerForm.authToken = '__unchanged__'
+    providerForm.modelMappings.opus = entry.modelMappings?.opus ?? ''
+    providerForm.modelMappings.sonnet = entry.modelMappings?.sonnet ?? ''
+    providerForm.modelMappings.haiku = entry.modelMappings?.haiku ?? ''
+  }
+}, { immediate: true })
+
+async function handleSaveProvider() {
+  providerSaveError.value = ''
+  if (!providerForm.baseUrl) { providerSaveError.value = 'Base URL is required'; return }
+  if (!providerForm.authToken) { providerSaveError.value = 'Auth Token is required'; return }
+  try {
+    new URL(providerForm.baseUrl)
+  }
+  catch {
+    providerSaveError.value = 'Base URL must be a valid URL'
+    return
+  }
+  await saveCustomEntry({
+    displayName: providerForm.displayName || 'Custom Provider',
+    baseUrl: providerForm.baseUrl,
+    authToken: providerForm.authToken,
+    modelMappings: {
+      ...(providerForm.modelMappings.opus ? { opus: providerForm.modelMappings.opus } : {}),
+      ...(providerForm.modelMappings.sonnet ? { sonnet: providerForm.modelMappings.sonnet } : {}),
+      ...(providerForm.modelMappings.haiku ? { haiku: providerForm.modelMappings.haiku } : {}),
+    },
+  })
+}
+
+async function handleRemoveProvider() {
+  await removeCustomProvider()
+  providerForm.displayName = ''
+  providerForm.baseUrl = ''
+  providerForm.authToken = ''
+  providerForm.modelMappings = { opus: '', sonnet: '', haiku: '' }
+}
 const {
   skillImports,
   agentImports,
@@ -499,6 +564,89 @@ const lineCount = computed(() => rawJson.value.split('\n').length)
                 </button>
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Custom Provider -->
+      <div class="rounded-xl p-5 space-y-4 bg-card">
+        <h3 class="text-section-title">Custom Provider</h3>
+        <p class="text-[12px] text-meta">
+          Configure an Anthropic-compatible API endpoint to use instead of Claude.
+        </p>
+
+        <div class="space-y-3">
+          <div class="space-y-1">
+            <label class="text-[12px] font-medium text-body">Provider Name</label>
+            <input v-model="providerForm.displayName" class="field-input" placeholder="My Custom Provider" />
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[12px] font-medium text-body">Base URL <span class="text-error">*</span></label>
+            <input v-model="providerForm.baseUrl" class="field-input" placeholder="https://example.me" />
+          </div>
+
+          <div class="space-y-1">
+            <label class="text-[12px] font-medium text-body">Auth Token <span class="text-error">*</span></label>
+            <div class="relative">
+              <input
+                v-model="providerForm.authToken"
+                :type="showAuthToken ? 'text' : 'password'"
+                class="field-input pr-10"
+                placeholder="sk-***"
+              />
+              <button
+                type="button"
+                class="absolute right-2.5 top-1/2 -translate-y-1/2 text-meta hover:text-body transition-colors"
+                @click="showAuthToken = !showAuthToken"
+              >
+                <UIcon :name="showAuthToken ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="size-3.5" />
+              </button>
+            </div>
+          </div>
+
+          <div class="space-y-2">
+            <p class="text-[12px] font-medium text-body">
+              Model Mappings
+              <span class="font-normal text-meta">(optional — empty = use default Claude model)</span>
+            </p>
+            <div class="grid grid-cols-3 gap-2">
+              <div class="space-y-1">
+                <label class="text-[11px] text-meta">Opus →</label>
+                <input v-model="providerForm.modelMappings.opus" class="field-input text-[12px]" placeholder="claude-opus-4" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-[11px] text-meta">Sonnet →</label>
+                <input v-model="providerForm.modelMappings.sonnet" class="field-input text-[12px]" placeholder="claude-sonnet-4" />
+              </div>
+              <div class="space-y-1">
+                <label class="text-[11px] text-meta">Haiku →</label>
+                <input v-model="providerForm.modelMappings.haiku" class="field-input text-[12px]" placeholder="claude-haiku-4" />
+              </div>
+            </div>
+          </div>
+
+          <p v-if="providerSaveError" class="text-[12px] text-error">{{ providerSaveError }}</p>
+
+          <div class="flex justify-between pt-1">
+            <button
+              v-if="hasCustomProvider"
+              type="button"
+              class="text-[12px] text-error hover:opacity-80 transition-opacity"
+              :disabled="providerLoading"
+              @click="handleRemoveProvider"
+            >
+              Remove Provider
+            </button>
+            <div v-else />
+
+            <UButton
+              size="sm"
+              :loading="providerLoading"
+              @click="handleSaveProvider"
+            >
+              Save Provider
+            </UButton>
           </div>
         </div>
       </div>
