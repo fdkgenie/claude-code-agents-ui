@@ -576,3 +576,19 @@ export interface ProviderFetchResult {
   hasMore: boolean
   tokenUsage?: TokenUsage
 }
+
+// ── Custom Provider Config ─────────────────────────────
+
+export interface ProviderEntry {
+  name: string
+  displayName: string
+  builtIn?: boolean
+  baseUrl?: string
+  authToken?: string
+  modelMappings?: Partial<Record<'opus' | 'sonnet' | 'haiku', string>>
+}
+
+export interface ProviderConfig {
+  defaultProvider: string
+  providers: ProviderEntry[]
+}
