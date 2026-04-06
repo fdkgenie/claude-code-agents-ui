@@ -4,20 +4,30 @@ import { getProviderConfig, saveProviderConfig } from '../../../utils/providers/
 import { CustomAnthropicProvider, customProviderInfo } from '../../../utils/providers/customProvider'
 import type { ProviderEntry } from '../../../utils/providers/providerConfig'
 
+const SLUG_REGEX = /^[a-z0-9-]+$/
+
 export default defineEventHandler(async (event) => {
   const body = await readBody<{ entry?: ProviderEntry; defaultProvider?: string }>(event)
 
   const config = await getProviderConfig()
 
   if (body.entry) {
-    // Sentinel: '__unchanged__' means keep existing auth token
-    if (body.entry.authToken === '__unchanged__') {
-      const existing = config.providers.find(p => p.name === 'custom')
-      body.entry.authToken = existing?.authToken
+    const entry = { ...body.entry }
+
+    if (!entry.name || !SLUG_REGEX.test(entry.name)) {
+      throw createError({ statusCode: 400, message: 'Invalid slug. Use lowercase letters, numbers, and hyphens only.' })
+    }
+    if (entry.name === 'claude') {
+      throw createError({ statusCode: 400, message: 'Cannot override built-in provider.' })
     }
 
-    const idx = config.providers.findIndex(p => p.name === 'custom')
-    const entry: ProviderEntry = { ...body.entry, name: 'custom' }
+    // '__unchanged__' sentinel: keep existing auth token
+    if (entry.authToken === '__unchanged__') {
+      const existing = config.providers.find(p => p.name === entry.name)
+      entry.authToken = existing?.authToken
+    }
+
+    const idx = config.providers.findIndex(p => p.name === entry.name)
     if (idx >= 0) {
       config.providers[idx] = entry
     }
@@ -25,7 +35,6 @@ export default defineEventHandler(async (event) => {
       config.providers.push(entry)
     }
 
-    // Re-register in registry
     if (entry.baseUrl && entry.authToken) {
       providerRegistry.register(new CustomAnthropicProvider(entry), customProviderInfo(entry))
     }
