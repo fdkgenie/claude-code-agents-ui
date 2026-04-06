@@ -6,11 +6,12 @@ import { CustomAnthropicProvider, customProviderInfo } from '../utils/providers/
 export default defineNitroPlugin(async () => {
   try {
     const config = await getProviderConfig()
-    const customEntry = config.providers.find(p => p.name === 'custom' && !p.builtIn)
 
-    if (customEntry?.baseUrl && customEntry?.authToken) {
-      providerRegistry.register(new CustomAnthropicProvider(customEntry), customProviderInfo(customEntry))
-      console.log('[providers] Registered custom provider:', customEntry.displayName)
+    for (const entry of config.providers) {
+      if (!entry.builtIn && entry.baseUrl && entry.authToken) {
+        providerRegistry.register(new CustomAnthropicProvider(entry), customProviderInfo(entry))
+        console.log('[providers] Registered provider:', entry.name, '-', entry.displayName)
+      }
     }
 
     if (providerRegistry.has(config.defaultProvider)) {
