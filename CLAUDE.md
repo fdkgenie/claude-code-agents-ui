@@ -32,8 +32,12 @@ bun run typecheck    # Run TypeScript type checking
 - `/skills` - List and manage skills
 - `/workflows` - Visual workflow builder
 - `/graph` - Relationship visualization
-- `/explore` - Browse templates and marketplace
+- `/explore` - Browse templates and marketplace (`/templates` redirects here)
 - `/cli` - Full terminal emulator with context monitoring
+- `/plugins` - Plugin list and management
+- `/plugins/[id]` - Plugin detail page
+- `/mcp` - MCP server list
+- `/mcp/[name]` - MCP server configuration
 - `/settings` - Global settings
 
 **Composables** (`app/composables/`):
@@ -60,6 +64,9 @@ The Agent Studio (`/agents/[slug]` page with test panel) uses SSE (Server-Sent E
 - `relationships.ts` - Extract relationships between agents/commands/skills by scanning frontmatter (`agent:` field) and body text for references
 - `github.ts` - Clone, scan, and import skills from GitHub repos
 - `marketplace.ts` - Fetch and install plugins from marketplace sources
+- `claudeProjects.ts` - Read Claude Code project/session data from `~/.claude/projects/`
+- `providers/` - Multi-provider AI backend registry (`registry.ts`, `claudeProvider.ts`, `types.ts`)
+- `slugUtils.ts` - Slug generation and normalization utilities
 
 **API Routes** (`server/api/`):
 All CRUD routes follow REST conventions:
@@ -74,7 +81,23 @@ Special endpoints:
 - `GET /api/relationships` - Build graph data by extracting relationships
 - `GET /api/agents/[slug]/skills` - List skills assigned to an agent
 - `POST /api/github/import` - Import skills from GitHub
+- `GET /api/github/check-updates` - Check for updates in imported repos
 - `POST /api/marketplace/install` - Install plugin from marketplace
+- `GET|POST|DELETE /api/marketplace/sources` - Manage custom marketplace sources
+- `GET|POST|PUT|DELETE /api/mcp` - MCP server CRUD
+- `GET|POST|DELETE /api/plugins` - Plugin management
+- `GET /api/claude/projects` - List Claude Code projects from `~/.claude/projects/`
+- `GET /api/claude/sessions` - List Claude Code sessions
+- `GET /api/files`, `GET /api/directories` - File system browsing
+- `POST /api/reveal` - Open file in Finder/Explorer
+- `GET /api/suggestions` - Context-aware suggestions
+
+**v2 API** (`server/api/v2/`):
+- `/api/v2/chat/ws` - Next-gen chat WebSocket handler
+- `/api/v2/claude-code/*` - Claude Code project/session management
+- `/api/v2/providers/*` - AI provider registry (supports multiple backends)
+- `/api/v2/permissions/*` - Permission management
+- `/api/v2/sessions/*` - Session CRUD for v2 chat
 
 ### Data Model
 
@@ -364,8 +387,17 @@ When adding new features:
 ## Environment Variables
 
 ```bash
+ANTHROPIC_API_KEY=""    # Required for chat/studio features
+ANTHROPIC_BASE_URL=""   # Optional: override API endpoint
+ANTHROPIC_MODEL=""      # Optional: override default model
 CLAUDE_DIR="~/.claude"  # Override default Claude config directory
 ```
+
+Copy `.env.sample` to `.env` to get started. `ANTHROPIC_API_KEY` is required for any chat or agent query functionality.
+
+## Testing & Linting
+
+There are **no automated tests or linting configured** in this project. Manual testing is done by running the dev server and verifying behavior in the browser. TypeScript type checking (`bun run typecheck`) is the only static analysis tool available.
 
 ## Component Organization
 
