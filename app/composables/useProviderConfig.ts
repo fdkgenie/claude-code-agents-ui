@@ -18,13 +18,13 @@ export function useProviderConfig() {
     }
   }
 
-  /** Save/update the custom provider entry (entry.name will be forced to 'custom') */
-  async function saveCustomEntry(entry: Omit<ProviderEntry, 'name' | 'builtIn'>) {
+  /** Save (create or update) a provider entry. entry.name is the slug. */
+  async function saveProvider(entry: ProviderEntry) {
     loading.value = true
     try {
       await $fetch('/api/v2/providers/config', {
         method: 'PUT',
-        body: { entry: { ...entry, name: 'custom' } },
+        body: { entry },
       })
       await load()
     }
@@ -33,11 +33,11 @@ export function useProviderConfig() {
     }
   }
 
-  /** Delete the custom provider and reset default to 'claude' */
-  async function removeCustomProvider() {
+  /** Delete a custom provider by slug. */
+  async function removeProvider(name: string) {
     loading.value = true
     try {
-      await $fetch('/api/v2/providers/custom', { method: 'DELETE' })
+      await $fetch(`/api/v2/providers/${name}`, { method: 'DELETE' })
       await load()
     }
     finally {
@@ -45,10 +45,7 @@ export function useProviderConfig() {
     }
   }
 
-  /**
-   * Switch the active provider and persist it as default.
-   * Does NOT touch the custom entry details.
-   */
+  /** Switch the active provider and persist as default. */
   async function switchProvider(providerName: string) {
     selectedProvider.value = providerName
     await $fetch('/api/v2/providers/config', {
@@ -57,11 +54,11 @@ export function useProviderConfig() {
     })
   }
 
-  const customEntry = computed(
-    () => config.value?.providers.find(p => p.name === 'custom' && !p.builtIn) ?? null,
+  const customProviders = computed(
+    () => config.value?.providers.filter(p => !p.builtIn) ?? [],
   )
 
-  const hasCustomProvider = computed(() => !!customEntry.value)
+  const hasCustomProvider = computed(() => customProviders.value.length > 0)
 
   const providers = computed(() => config.value?.providers ?? [])
 
@@ -70,10 +67,10 @@ export function useProviderConfig() {
     selectedProvider,
     loading,
     load,
-    saveCustomEntry,
-    removeCustomProvider,
+    saveProvider,
+    removeProvider,
     switchProvider,
-    customEntry,
+    customProviders,
     hasCustomProvider,
     providers,
   }
