@@ -37,6 +37,25 @@ const {
   contextMonitor,
 } = useChatV2Handler()
 
+// Provider config
+const { load: loadProviders, providers, selectedProvider, switchProvider, customEntry } = useProviderConfig()
+
+onMounted(() => {
+  loadProviders()
+})
+
+const mappedModelOptions = computed(() => {
+  const mappings = customEntry.value?.modelMappings
+  if (selectedProvider.value !== 'custom' || !mappings) return MODEL_OPTIONS_CHAT
+
+  return MODEL_OPTIONS_CHAT.map(opt => {
+    const mapped = mappings[opt.value as 'opus' | 'sonnet' | 'haiku']
+    return mapped
+      ? { ...opt, label: `${opt.label} · ${mapped}`, description: mapped }
+      : opt
+  })
+})
+
 // Claude Code history
 const history = useClaudeCodeHistory()
 const {
@@ -908,6 +927,7 @@ function sendRegularMessage(text: string, images: string[]) {
       model: selectedModel.value,
       effort: effortLevel.value,
       images,
+      provider: selectedProvider.value,
     })
     return
   }
@@ -919,6 +939,7 @@ function sendRegularMessage(text: string, images: string[]) {
     model: selectedModel.value,
     effort: effortLevel.value,
     images,
+    provider: selectedProvider.value,
   })
 }
 
@@ -1125,11 +1146,19 @@ function handleOpenFile(filePath: string) {
         </div>
 
         <div class="flex items-center gap-2 shrink-0">
+          <!-- Provider Selector -->
+          <ChatV2ProviderSelector
+            v-if="(viewMode === 'history' && urlSessionId) || (viewMode === 'live' && isLiveChat)"
+            :model-value="selectedProvider"
+            :options="providers"
+            @update:model-value="switchProvider"
+          />
+
           <!-- Model Selector -->
           <ChatV2ModelSelector
             v-if="(viewMode === 'history' && urlSessionId) || (viewMode === 'live' && isLiveChat)"
             v-model="selectedModel"
-            :options="MODEL_OPTIONS_CHAT"
+            :options="mappedModelOptions"
           />
 
           <!-- Permission Mode Selector (only when viewing a specific chat session) -->
